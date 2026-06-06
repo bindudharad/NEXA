@@ -1,0 +1,278 @@
+2026-06-06T05:34:34.8832186+05:30 INFO backend.main Starting Nexa API
+2026-06-06 05:59:53,429 INFO backend.main Starting Nexa API
+2026-06-06 05:59:58,543 INFO apscheduler.scheduler Scheduler started
+2026-06-06 05:59:58,550 INFO apscheduler.scheduler Added job "SchedulerAgent._schedule_cron.<locals>.<lambda>" to job store "default"
+2026-06-06 05:59:58,551 INFO apscheduler.scheduler Added job "SchedulerAgent._schedule_cron.<locals>.<lambda>" to job store "default"
+2026-06-06 05:59:58,552 INFO apscheduler.scheduler Added job "SchedulerAgent._schedule_cron.<locals>.<lambda>" to job store "default"
+2026-06-06 05:59:58,556 INFO apscheduler.scheduler Scheduler started
+2026-06-06 05:59:58,560 INFO apscheduler.scheduler Added job "SchedulerAgent.schedule_at.<locals>.<lambda>" to job store "default"
+2026-06-06 05:59:58,561 INFO apscheduler.scheduler Added job "SchedulerAgent.create_reminder.<locals>.<lambda>" to job store "default"
+2026-06-06 05:59:58,566 INFO apscheduler.scheduler Scheduler started
+2026-06-06 05:59:58,650 INFO httpx HTTP Request: GET http://testserver/api/health "HTTP/1.1 200 OK"
+2026-06-06 05:59:58,694 INFO nexa.tasks Task 39 started: remember this preference
+2026-06-06 05:59:58,721 INFO nexa.tasks Task 39 completed
+2026-06-06 05:59:58,726 INFO httpx HTTP Request: POST http://testserver/api/commands "HTTP/1.1 200 OK"
+2026-06-06 05:59:58,740 INFO httpx HTTP Request: POST http://testserver/api/files/delete "HTTP/1.1 409 Conflict"
+2026-06-06 05:59:58,765 INFO httpx HTTP Request: POST http://testserver/api/memory "HTTP/1.1 200 OK"
+2026-06-06 05:59:58,775 INFO httpx HTTP Request: GET http://testserver/api/memory "HTTP/1.1 200 OK"
+2026-06-06 05:59:58,901 INFO httpx HTTP Request: GET http://testserver/api/dashboard "HTTP/1.1 200 OK"
+2026-06-06 05:59:58,915 INFO httpx HTTP Request: GET http://testserver/api/tasks "HTTP/1.1 200 OK"
+2026-06-06 05:59:59,028 INFO httpx HTTP Request: GET http://testserver/api/coding/report "HTTP/1.1 200 OK"
+2026-06-06 05:59:59,138 INFO httpx HTTP Request: GET http://testserver/api/coding/weekly-report "HTTP/1.1 200 OK"
+2026-06-06 05:59:59,207 INFO httpx HTTP Request: POST http://testserver/api/coding/snapshot "HTTP/1.1 200 OK"
+2026-06-06 05:59:59,234 INFO httpx HTTP Request: POST http://testserver/api/automations "HTTP/1.1 200 OK"
+2026-06-06 05:59:59,566 INFO httpx HTTP Request: POST http://testserver/api/automations/evaluate "HTTP/1.1 200 OK"
+2026-06-06 05:59:59,592 INFO httpx HTTP Request: POST http://testserver/api/automations "HTTP/1.1 200 OK"
+2026-06-06 05:59:59,770 INFO httpx HTTP Request: POST http://testserver/api/events "HTTP/1.1 200 OK"
+2026-06-06 05:59:59,789 INFO httpx HTTP Request: POST http://testserver/api/files/search "HTTP/1.1 422 Unprocessable Entity"
+2026-06-06 05:59:59,821 INFO httpx HTTP Request: POST http://testserver/api/notifications "HTTP/1.1 200 OK"
+2026-06-06 05:59:59,838 INFO httpx HTTP Request: GET http://testserver/api/battery-alert/settings "HTTP/1.1 200 OK"
+2026-06-06 05:59:59,876 INFO httpx HTTP Request: PUT http://testserver/api/battery-alert/settings "HTTP/1.1 200 OK"
+2026-06-06 05:59:59,892 INFO httpx HTTP Request: POST http://testserver/api/battery-alert/test/simulate "HTTP/1.1 200 OK"
+2026-06-06 05:59:59,902 INFO httpx HTTP Request: GET http://testserver/api/battery-alert/status "HTTP/1.1 200 OK"
+2026-06-06 05:59:59,916 INFO httpx HTTP Request: POST http://testserver/api/battery-alert/test/clear "HTTP/1.1 200 OK"
+2026-06-06 06:00:01,266 WARNING nexa.battery Alert Triggered battery_percent=20 charging=False timestamp=2026-06-06T00:30:01.266883
+2026-06-06 06:00:01,268 INFO nexa.battery Alert Stopped battery_percent=20 charging=True timestamp=2026-06-06T00:30:01.268896
+2026-06-06 06:00:01,303 WARNING nexa.battery Alert Triggered battery_percent=10 charging=False timestamp=2026-06-06T00:30:01.303978
+2026-06-06 06:00:01,318 WARNING nexa.battery Alert Triggered battery_percent=10 charging=False timestamp=2026-06-06T00:30:01.318733
+2026-06-06 06:00:01,368 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:00:02,197 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:00:02,218 INFO nexa.tasks Task 41 started: remember task manager test
+2026-06-06 06:00:02,640 INFO nexa.tasks Task 41 completed
+2026-06-06 06:00:02,762 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:00:03,811 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:00:03,936 INFO nexa.tasks Task 42 started: bad
+2026-06-06 06:00:03,936 ERROR backend.core.task_manager Task failed
+Traceback (most recent call last):
+  File "C:\Programs\codex\BINDAS AGENT\backend\core\task_manager.py", line 68, in execute
+    agent = self._agent(plan.agent)
+  File "C:\Programs\codex\BINDAS AGENT\backend\core\task_manager.py", line 104, in _agent
+    raise ValueError(f"Unknown agent: {name}")
+ValueError: Unknown agent: unknown
+2026-06-06 06:00:03,958 ERROR nexa.tasks Task 42 failed: Unknown agent: unknown
+2026-06-06 06:02:38,962 INFO backend.main Starting Nexa API
+2026-06-06 06:02:44,542 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:02:44,544 INFO apscheduler.scheduler Added job "SchedulerAgent._schedule_cron.<locals>.<lambda>" to job store "default"
+2026-06-06 06:02:44,544 INFO apscheduler.scheduler Added job "SchedulerAgent._schedule_cron.<locals>.<lambda>" to job store "default"
+2026-06-06 06:02:44,545 INFO apscheduler.scheduler Added job "SchedulerAgent._schedule_cron.<locals>.<lambda>" to job store "default"
+2026-06-06 06:02:44,549 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:02:44,551 INFO apscheduler.scheduler Added job "SchedulerAgent.schedule_at.<locals>.<lambda>" to job store "default"
+2026-06-06 06:02:44,552 INFO apscheduler.scheduler Added job "SchedulerAgent.create_reminder.<locals>.<lambda>" to job store "default"
+2026-06-06 06:02:44,554 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:02:44,630 INFO httpx HTTP Request: GET http://testserver/api/health "HTTP/1.1 200 OK"
+2026-06-06 06:02:44,753 INFO nexa.tasks Task 43 started: remember this preference
+2026-06-06 06:02:44,782 INFO nexa.tasks Task 43 completed
+2026-06-06 06:02:44,789 INFO httpx HTTP Request: POST http://testserver/api/commands "HTTP/1.1 200 OK"
+2026-06-06 06:02:44,805 INFO httpx HTTP Request: POST http://testserver/api/files/delete "HTTP/1.1 409 Conflict"
+2026-06-06 06:02:44,835 INFO httpx HTTP Request: POST http://testserver/api/memory "HTTP/1.1 200 OK"
+2026-06-06 06:02:44,848 INFO httpx HTTP Request: GET http://testserver/api/memory "HTTP/1.1 200 OK"
+2026-06-06 06:02:44,978 INFO httpx HTTP Request: GET http://testserver/api/dashboard "HTTP/1.1 200 OK"
+2026-06-06 06:02:44,991 INFO httpx HTTP Request: GET http://testserver/api/tasks "HTTP/1.1 200 OK"
+2026-06-06 06:02:45,113 INFO httpx HTTP Request: GET http://testserver/api/coding/report "HTTP/1.1 200 OK"
+2026-06-06 06:02:45,220 INFO httpx HTTP Request: GET http://testserver/api/coding/weekly-report "HTTP/1.1 200 OK"
+2026-06-06 06:02:45,284 INFO httpx HTTP Request: POST http://testserver/api/coding/snapshot "HTTP/1.1 200 OK"
+2026-06-06 06:02:45,311 INFO httpx HTTP Request: POST http://testserver/api/automations "HTTP/1.1 200 OK"
+2026-06-06 06:02:45,632 INFO httpx HTTP Request: POST http://testserver/api/automations/evaluate "HTTP/1.1 200 OK"
+2026-06-06 06:02:45,656 INFO httpx HTTP Request: POST http://testserver/api/automations "HTTP/1.1 200 OK"
+2026-06-06 06:02:45,840 INFO httpx HTTP Request: POST http://testserver/api/events "HTTP/1.1 200 OK"
+2026-06-06 06:02:45,854 INFO httpx HTTP Request: POST http://testserver/api/files/search "HTTP/1.1 422 Unprocessable Entity"
+2026-06-06 06:02:45,881 INFO httpx HTTP Request: POST http://testserver/api/notifications "HTTP/1.1 200 OK"
+2026-06-06 06:02:45,896 INFO httpx HTTP Request: GET http://testserver/api/battery-alert/settings "HTTP/1.1 200 OK"
+2026-06-06 06:02:45,929 INFO httpx HTTP Request: PUT http://testserver/api/battery-alert/settings "HTTP/1.1 200 OK"
+2026-06-06 06:02:45,941 INFO httpx HTTP Request: POST http://testserver/api/battery-alert/test/simulate "HTTP/1.1 200 OK"
+2026-06-06 06:02:45,950 INFO httpx HTTP Request: GET http://testserver/api/battery-alert/status "HTTP/1.1 200 OK"
+2026-06-06 06:02:45,960 INFO httpx HTTP Request: POST http://testserver/api/battery-alert/test/clear "HTTP/1.1 200 OK"
+2026-06-06 06:02:46,493 WARNING nexa.battery Alert Triggered battery_percent=20 charging=False timestamp=2026-06-06T00:32:46.493906
+2026-06-06 06:02:46,495 INFO nexa.battery Alert Stopped battery_percent=20 charging=True timestamp=2026-06-06T00:32:46.495918
+2026-06-06 06:02:46,524 WARNING nexa.battery Alert Triggered battery_percent=10 charging=False timestamp=2026-06-06T00:32:46.524738
+2026-06-06 06:02:46,540 WARNING nexa.battery Alert Triggered battery_percent=10 charging=False timestamp=2026-06-06T00:32:46.540367
+2026-06-06 06:02:46,585 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:02:46,616 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:02:46,641 INFO nexa.tasks Task 45 started: remember task manager test
+2026-06-06 06:02:46,664 INFO nexa.tasks Task 45 completed
+2026-06-06 06:02:46,792 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:02:46,917 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:02:46,931 INFO nexa.tasks Task 46 started: bad
+2026-06-06 06:02:46,931 ERROR backend.core.task_manager Task failed
+Traceback (most recent call last):
+  File "C:\Programs\codex\BINDAS AGENT\backend\core\task_manager.py", line 68, in execute
+    agent = self._agent(plan.agent)
+  File "C:\Programs\codex\BINDAS AGENT\backend\core\task_manager.py", line 104, in _agent
+    raise ValueError(f"Unknown agent: {name}")
+ValueError: Unknown agent: unknown
+2026-06-06 06:02:46,933 ERROR nexa.tasks Task 46 failed: Unknown agent: unknown
+2026-06-06 06:03:23,321 INFO backend.main Starting Nexa API
+2026-06-06 06:03:23,418 INFO nexa.battery Battery alert monitor started
+2026-06-06 06:03:23,428 INFO nexa.battery Battery alert monitor stopped
+2026-06-06 06:04:05,987 INFO backend.main Starting Nexa API
+2026-06-06 06:04:06,073 INFO nexa.battery Battery alert monitor started
+2026-06-06 06:04:06,077 INFO nexa.battery Battery alert monitor stopped
+2026-06-06 06:05:17,994 INFO backend.main Starting Nexa API
+2026-06-06 06:05:18,074 INFO nexa.battery Battery alert monitor started
+2026-06-06 06:05:39,701 WARNING nexa.battery Alert Triggered battery_percent=20 charging=False timestamp=2026-06-06T00:35:39.701498
+2026-06-06 06:05:39,709 INFO nexa.battery Alert Stopped battery_percent=20 charging=True timestamp=2026-06-06T00:35:39.709071
+2026-06-06 06:12:57,896 INFO backend.main Starting Nexa API
+2026-06-06 06:13:34,905 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:13:34,989 INFO apscheduler.scheduler Added job "SchedulerAgent._schedule_cron.<locals>.<lambda>" to job store "default"
+2026-06-06 06:13:34,992 INFO apscheduler.scheduler Added job "SchedulerAgent._schedule_cron.<locals>.<lambda>" to job store "default"
+2026-06-06 06:13:34,993 INFO apscheduler.scheduler Added job "SchedulerAgent._schedule_cron.<locals>.<lambda>" to job store "default"
+2026-06-06 06:13:34,998 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:13:35,003 INFO apscheduler.scheduler Added job "SchedulerAgent.schedule_at.<locals>.<lambda>" to job store "default"
+2026-06-06 06:13:35,003 INFO apscheduler.scheduler Added job "SchedulerAgent.create_reminder.<locals>.<lambda>" to job store "default"
+2026-06-06 06:13:35,010 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:13:35,138 INFO httpx HTTP Request: GET http://testserver/api/health "HTTP/1.1 200 OK"
+2026-06-06 06:13:35,221 INFO nexa.tasks Task 47 started: remember this preference
+2026-06-06 06:13:35,419 INFO nexa.tasks Task 47 completed
+2026-06-06 06:13:35,428 INFO httpx HTTP Request: POST http://testserver/api/commands "HTTP/1.1 200 OK"
+2026-06-06 06:13:35,444 INFO httpx HTTP Request: POST http://testserver/api/files/delete "HTTP/1.1 409 Conflict"
+2026-06-06 06:13:35,501 INFO httpx HTTP Request: POST http://testserver/api/memory "HTTP/1.1 200 OK"
+2026-06-06 06:13:35,517 INFO httpx HTTP Request: GET http://testserver/api/memory "HTTP/1.1 200 OK"
+2026-06-06 06:13:35,657 INFO httpx HTTP Request: GET http://testserver/api/dashboard "HTTP/1.1 200 OK"
+2026-06-06 06:13:35,672 INFO httpx HTTP Request: GET http://testserver/api/tasks "HTTP/1.1 200 OK"
+2026-06-06 06:13:35,854 INFO httpx HTTP Request: GET http://testserver/api/coding/report "HTTP/1.1 200 OK"
+2026-06-06 06:13:35,985 INFO httpx HTTP Request: GET http://testserver/api/coding/weekly-report "HTTP/1.1 200 OK"
+2026-06-06 06:13:36,095 INFO httpx HTTP Request: POST http://testserver/api/coding/snapshot "HTTP/1.1 200 OK"
+2026-06-06 06:13:36,143 INFO httpx HTTP Request: POST http://testserver/api/automations "HTTP/1.1 200 OK"
+2026-06-06 06:13:36,951 INFO httpx HTTP Request: POST http://testserver/api/automations/evaluate "HTTP/1.1 200 OK"
+2026-06-06 06:13:36,994 INFO httpx HTTP Request: POST http://testserver/api/automations "HTTP/1.1 200 OK"
+2026-06-06 06:13:37,433 INFO httpx HTTP Request: POST http://testserver/api/events "HTTP/1.1 200 OK"
+2026-06-06 06:13:37,445 INFO httpx HTTP Request: POST http://testserver/api/files/search "HTTP/1.1 422 Unprocessable Entity"
+2026-06-06 06:13:37,491 INFO httpx HTTP Request: POST http://testserver/api/notifications "HTTP/1.1 200 OK"
+2026-06-06 06:13:37,509 INFO httpx HTTP Request: GET http://testserver/api/battery-alert/settings "HTTP/1.1 200 OK"
+2026-06-06 06:13:37,562 INFO httpx HTTP Request: PUT http://testserver/api/battery-alert/settings "HTTP/1.1 200 OK"
+2026-06-06 06:13:37,574 INFO httpx HTTP Request: POST http://testserver/api/battery-alert/test/simulate "HTTP/1.1 200 OK"
+2026-06-06 06:13:37,582 INFO httpx HTTP Request: GET http://testserver/api/battery-alert/status "HTTP/1.1 200 OK"
+2026-06-06 06:13:37,592 INFO httpx HTTP Request: POST http://testserver/api/battery-alert/test/clear "HTTP/1.1 200 OK"
+2026-06-06 06:13:40,028 WARNING nexa.battery Alert Triggered battery_percent=20 charging=False timestamp=2026-06-06T00:43:40.028198
+2026-06-06 06:13:40,030 INFO nexa.battery Alert Stopped battery_percent=20 charging=True timestamp=2026-06-06T00:43:40.030434
+2026-06-06 06:13:40,126 WARNING nexa.battery Alert Triggered battery_percent=10 charging=False timestamp=2026-06-06T00:43:40.126662
+2026-06-06 06:13:40,168 WARNING nexa.battery Alert Triggered battery_percent=10 charging=False timestamp=2026-06-06T00:43:40.168236
+2026-06-06 06:13:40,252 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:13:40,447 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:13:40,493 INFO nexa.tasks Task 49 started: remember task manager test
+2026-06-06 06:13:40,536 INFO nexa.tasks Task 49 completed
+2026-06-06 06:13:40,665 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:13:40,706 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:13:40,838 INFO nexa.tasks Task 50 started: bad
+2026-06-06 06:13:40,839 ERROR backend.core.task_manager Task failed
+Traceback (most recent call last):
+  File "C:\Programs\codex\BINDAS AGENT\backend\core\task_manager.py", line 68, in execute
+    agent = self._agent(plan.agent)
+  File "C:\Programs\codex\BINDAS AGENT\backend\core\task_manager.py", line 104, in _agent
+    raise ValueError(f"Unknown agent: {name}")
+ValueError: Unknown agent: unknown
+2026-06-06 06:13:40,843 ERROR nexa.tasks Task 50 failed: Unknown agent: unknown
+2026-06-06 06:13:48,482 WARNING nexa.battery Alert Triggered battery_percent=24 charging=False timestamp=2026-06-06T00:43:48.482639
+2026-06-06 06:15:48,544 WARNING nexa.battery Alert Triggered battery_percent=23 charging=False timestamp=2026-06-06T00:45:48.542660
+2026-06-06 06:16:50,454 INFO backend.main Starting Nexa API
+2026-06-06 06:16:55,615 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:16:55,618 INFO apscheduler.scheduler Added job "SchedulerAgent._schedule_cron.<locals>.<lambda>" to job store "default"
+2026-06-06 06:16:55,619 INFO apscheduler.scheduler Added job "SchedulerAgent._schedule_cron.<locals>.<lambda>" to job store "default"
+2026-06-06 06:16:55,620 INFO apscheduler.scheduler Added job "SchedulerAgent._schedule_cron.<locals>.<lambda>" to job store "default"
+2026-06-06 06:16:55,623 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:16:55,626 INFO apscheduler.scheduler Added job "SchedulerAgent.schedule_at.<locals>.<lambda>" to job store "default"
+2026-06-06 06:16:55,627 INFO apscheduler.scheduler Added job "SchedulerAgent.create_reminder.<locals>.<lambda>" to job store "default"
+2026-06-06 06:16:55,630 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:16:55,714 INFO httpx HTTP Request: GET http://testserver/api/health "HTTP/1.1 200 OK"
+2026-06-06 06:16:55,789 INFO nexa.tasks Task 51 started: remember this preference
+2026-06-06 06:16:55,815 INFO nexa.tasks Task 51 completed
+2026-06-06 06:16:55,823 INFO httpx HTTP Request: POST http://testserver/api/commands "HTTP/1.1 200 OK"
+2026-06-06 06:16:55,837 INFO httpx HTTP Request: POST http://testserver/api/files/delete "HTTP/1.1 409 Conflict"
+2026-06-06 06:16:55,866 INFO httpx HTTP Request: POST http://testserver/api/memory "HTTP/1.1 200 OK"
+2026-06-06 06:16:55,884 INFO httpx HTTP Request: GET http://testserver/api/memory "HTTP/1.1 200 OK"
+2026-06-06 06:16:56,022 INFO httpx HTTP Request: GET http://testserver/api/dashboard "HTTP/1.1 200 OK"
+2026-06-06 06:16:56,038 INFO httpx HTTP Request: GET http://testserver/api/tasks "HTTP/1.1 200 OK"
+2026-06-06 06:16:56,186 INFO httpx HTTP Request: GET http://testserver/api/coding/report "HTTP/1.1 200 OK"
+2026-06-06 06:16:56,283 INFO httpx HTTP Request: GET http://testserver/api/coding/weekly-report "HTTP/1.1 200 OK"
+2026-06-06 06:16:56,353 INFO httpx HTTP Request: POST http://testserver/api/coding/snapshot "HTTP/1.1 200 OK"
+2026-06-06 06:16:56,379 INFO httpx HTTP Request: POST http://testserver/api/automations "HTTP/1.1 200 OK"
+2026-06-06 06:16:56,727 INFO httpx HTTP Request: POST http://testserver/api/automations/evaluate "HTTP/1.1 200 OK"
+2026-06-06 06:16:56,751 INFO httpx HTTP Request: POST http://testserver/api/automations "HTTP/1.1 200 OK"
+2026-06-06 06:16:56,961 INFO httpx HTTP Request: POST http://testserver/api/events "HTTP/1.1 200 OK"
+2026-06-06 06:16:56,972 INFO httpx HTTP Request: POST http://testserver/api/files/search "HTTP/1.1 422 Unprocessable Entity"
+2026-06-06 06:16:56,997 INFO httpx HTTP Request: POST http://testserver/api/notifications "HTTP/1.1 200 OK"
+2026-06-06 06:16:57,014 INFO httpx HTTP Request: GET http://testserver/api/battery-alert/settings "HTTP/1.1 200 OK"
+2026-06-06 06:16:57,042 INFO httpx HTTP Request: PUT http://testserver/api/battery-alert/settings "HTTP/1.1 200 OK"
+2026-06-06 06:16:57,054 INFO httpx HTTP Request: POST http://testserver/api/battery-alert/test/simulate "HTTP/1.1 200 OK"
+2026-06-06 06:16:57,063 INFO httpx HTTP Request: GET http://testserver/api/battery-alert/status "HTTP/1.1 200 OK"
+2026-06-06 06:16:57,082 INFO httpx HTTP Request: POST http://testserver/api/battery-alert/test/clear "HTTP/1.1 200 OK"
+2026-06-06 06:16:57,711 WARNING nexa.battery Alert Triggered battery_percent=20 charging=False timestamp=2026-06-06T00:46:57.711895
+2026-06-06 06:16:57,714 INFO nexa.battery Alert Stopped battery_percent=20 charging=True timestamp=2026-06-06T00:46:57.714924
+2026-06-06 06:16:57,747 WARNING nexa.battery Alert Triggered battery_percent=10 charging=False timestamp=2026-06-06T00:46:57.747354
+2026-06-06 06:16:57,761 WARNING nexa.battery Alert Triggered battery_percent=10 charging=False timestamp=2026-06-06T00:46:57.761882
+2026-06-06 06:16:57,806 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:16:57,841 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:16:57,864 INFO nexa.tasks Task 53 started: remember task manager test
+2026-06-06 06:16:57,890 INFO nexa.tasks Task 53 completed
+2026-06-06 06:16:58,019 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:16:58,046 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:16:58,061 INFO nexa.tasks Task 54 started: bad
+2026-06-06 06:16:58,061 ERROR backend.core.task_manager Task failed
+Traceback (most recent call last):
+  File "C:\Programs\codex\BINDAS AGENT\backend\core\task_manager.py", line 68, in execute
+    agent = self._agent(plan.agent)
+  File "C:\Programs\codex\BINDAS AGENT\backend\core\task_manager.py", line 104, in _agent
+    raise ValueError(f"Unknown agent: {name}")
+ValueError: Unknown agent: unknown
+2026-06-06 06:16:58,063 ERROR nexa.tasks Task 54 failed: Unknown agent: unknown
+2026-06-06 06:17:48,604 WARNING nexa.battery Alert Triggered battery_percent=21 charging=False timestamp=2026-06-06T00:47:48.604018
+2026-06-06 06:18:18,611 INFO nexa.battery Alert Stopped battery_percent=21 charging=False timestamp=2026-06-06T00:48:18.611791
+2026-06-06 06:19:46,385 INFO backend.main Starting Nexa API
+2026-06-06 06:19:48,716 WARNING nexa.battery Alert Triggered battery_percent=19 charging=False timestamp=2026-06-06T00:49:48.716899
+2026-06-06 06:19:52,125 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:19:52,470 INFO apscheduler.scheduler Added job "SchedulerAgent._schedule_cron.<locals>.<lambda>" to job store "default"
+2026-06-06 06:19:52,473 INFO apscheduler.scheduler Added job "SchedulerAgent._schedule_cron.<locals>.<lambda>" to job store "default"
+2026-06-06 06:19:52,474 INFO apscheduler.scheduler Added job "SchedulerAgent._schedule_cron.<locals>.<lambda>" to job store "default"
+2026-06-06 06:19:52,481 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:19:53,305 INFO apscheduler.scheduler Added job "SchedulerAgent.schedule_at.<locals>.<lambda>" to job store "default"
+2026-06-06 06:19:54,349 INFO apscheduler.scheduler Added job "SchedulerAgent.create_reminder.<locals>.<lambda>" to job store "default"
+2026-06-06 06:19:54,353 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:19:54,422 INFO httpx HTTP Request: GET http://testserver/api/health "HTTP/1.1 200 OK"
+2026-06-06 06:19:58,986 INFO nexa.tasks Task 55 started: remember this preference
+2026-06-06 06:19:59,401 INFO nexa.tasks Task 55 completed
+2026-06-06 06:19:59,414 INFO httpx HTTP Request: POST http://testserver/api/commands "HTTP/1.1 200 OK"
+2026-06-06 06:19:59,454 INFO httpx HTTP Request: POST http://testserver/api/files/delete "HTTP/1.1 409 Conflict"
+2026-06-06 06:19:59,532 INFO httpx HTTP Request: POST http://testserver/api/memory "HTTP/1.1 200 OK"
+2026-06-06 06:19:59,580 INFO httpx HTTP Request: GET http://testserver/api/memory "HTTP/1.1 200 OK"
+2026-06-06 06:19:59,752 INFO httpx HTTP Request: GET http://testserver/api/dashboard "HTTP/1.1 200 OK"
+2026-06-06 06:19:59,772 INFO httpx HTTP Request: GET http://testserver/api/tasks "HTTP/1.1 200 OK"
+2026-06-06 06:20:00,246 INFO httpx HTTP Request: GET http://testserver/api/coding/report "HTTP/1.1 200 OK"
+2026-06-06 06:20:00,532 INFO httpx HTTP Request: GET http://testserver/api/coding/weekly-report "HTTP/1.1 200 OK"
+2026-06-06 06:20:00,628 INFO httpx HTTP Request: POST http://testserver/api/coding/snapshot "HTTP/1.1 200 OK"
+2026-06-06 06:20:00,708 INFO httpx HTTP Request: POST http://testserver/api/automations "HTTP/1.1 200 OK"
+2026-06-06 06:20:01,838 INFO httpx HTTP Request: POST http://testserver/api/automations/evaluate "HTTP/1.1 200 OK"
+2026-06-06 06:20:01,865 INFO httpx HTTP Request: POST http://testserver/api/automations "HTTP/1.1 200 OK"
+2026-06-06 06:20:02,181 INFO httpx HTTP Request: POST http://testserver/api/events "HTTP/1.1 200 OK"
+2026-06-06 06:20:02,193 INFO httpx HTTP Request: POST http://testserver/api/files/search "HTTP/1.1 422 Unprocessable Entity"
+2026-06-06 06:20:02,225 INFO httpx HTTP Request: POST http://testserver/api/notifications "HTTP/1.1 200 OK"
+2026-06-06 06:20:02,241 INFO httpx HTTP Request: GET http://testserver/api/battery-alert/settings "HTTP/1.1 200 OK"
+2026-06-06 06:20:02,268 INFO httpx HTTP Request: PUT http://testserver/api/battery-alert/settings "HTTP/1.1 200 OK"
+2026-06-06 06:20:02,282 INFO httpx HTTP Request: POST http://testserver/api/battery-alert/test/simulate "HTTP/1.1 200 OK"
+2026-06-06 06:20:02,290 INFO httpx HTTP Request: GET http://testserver/api/battery-alert/status "HTTP/1.1 200 OK"
+2026-06-06 06:20:02,332 WARNING nexa.battery Alert Triggered battery_percent=19 charging=False timestamp=2026-06-06T00:50:02.332161
+2026-06-06 06:20:02,337 INFO httpx HTTP Request: POST http://testserver/api/battery-alert/test/clear "HTTP/1.1 200 OK"
+2026-06-06 06:20:03,473 WARNING nexa.battery Alert Triggered battery_percent=20 charging=False timestamp=2026-06-06T00:50:03.473041
+2026-06-06 06:20:03,475 INFO nexa.battery Alert Stopped battery_percent=20 charging=True timestamp=2026-06-06T00:50:03.475041
+2026-06-06 06:20:03,505 WARNING nexa.battery Alert Triggered battery_percent=10 charging=False timestamp=2026-06-06T00:50:03.505157
+2026-06-06 06:20:03,519 WARNING nexa.battery Alert Triggered battery_percent=10 charging=False timestamp=2026-06-06T00:50:03.519214
+2026-06-06 06:20:03,694 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:20:03,725 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:20:03,744 INFO nexa.tasks Task 57 started: remember task manager test
+2026-06-06 06:20:03,762 INFO nexa.tasks Task 57 completed
+2026-06-06 06:20:03,880 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:20:03,903 INFO apscheduler.scheduler Scheduler started
+2026-06-06 06:20:03,915 INFO nexa.tasks Task 58 started: bad
+2026-06-06 06:20:03,915 ERROR backend.core.task_manager Task failed
+Traceback (most recent call last):
+  File "C:\Programs\codex\BINDAS AGENT\backend\core\task_manager.py", line 68, in execute
+    agent = self._agent(plan.agent)
+  File "C:\Programs\codex\BINDAS AGENT\backend\core\task_manager.py", line 104, in _agent
+    raise ValueError(f"Unknown agent: {name}")
+ValueError: Unknown agent: unknown
+2026-06-06 06:20:03,917 ERROR nexa.tasks Task 58 failed: Unknown agent: unknown
+2026-06-06 06:21:48,788 WARNING nexa.battery Alert Triggered battery_percent=18 charging=False timestamp=2026-06-06T00:51:48.788902
+2026-06-06 06:23:48,845 WARNING nexa.battery Alert Triggered battery_percent=17 charging=False timestamp=2026-06-06T00:53:48.845662
+2026-06-06 06:25:48,917 WARNING nexa.battery Alert Triggered battery_percent=15 charging=False timestamp=2026-06-06T00:55:48.917910
+2026-06-06 06:27:48,987 WARNING nexa.battery Alert Triggered battery_percent=14 charging=False timestamp=2026-06-06T00:57:48.987977
+2026-06-06 06:29:49,060 WARNING nexa.battery Alert Triggered battery_percent=13 charging=False timestamp=2026-06-06T00:59:49.059639
+2026-06-06 06:30:49,073 INFO nexa.battery Alert Stopped battery_percent=12 charging=True timestamp=2026-06-06T01:00:49.073559

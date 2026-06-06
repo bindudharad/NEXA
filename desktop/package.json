@@ -1,0 +1,30 @@
+{
+  "name": "nexa-desktop",
+  "version": "1.0.0",
+  "description": "Nexa Desktop floating control overlay",
+  "author": "Nexa",
+  "private": true,
+  "main": "electron/main.cjs",
+  "scripts": {
+    "electron": "electron .",
+    "electron:dev": "electron .",
+    "electron:build": "electron-builder --dir",
+    "dev": "electron .",
+    "build": "electron-builder --dir"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "latest",
+    "electron-builder": "latest"
+  },
+  "build": {
+    "appId": "com.nexa.desktop",
+    "productName": "Nexa Desktop",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "signAndEditExecutable": false
+    }
+  }
+}

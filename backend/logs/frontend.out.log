@@ -1,0 +1,21 @@
+
+> nexa@1.0.0 dev
+> npm --prefix frontend run dev
+
+
+> nexa-dashboard@1.0.0 dev
+> vite --host 127.0.0.1 --port 5173
+
+[2m5:30:32 am[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m Re-optimizing dependencies because lockfile has changed
+
+  [32m[1mVITE[22m v8.0.16[39m  [2mready in [0m[1m1431[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://127.0.0.1:[1m5173[22m/[39m
+[2m5:58:39 am[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/Automations.tsx, /src/pages/Chat.tsx, /src/pages/CodingAnalytics.tsx, /src/pages/Dashboard.tsx, /src/pages/Memory.tsx, /src/index.css[22m
+[2m5:58:39 am[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/Dashboard.tsx, /src/index.css[22m
+[2m5:58:39 am[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/Settings.tsx, /src/index.css[22m
+[2m5:59:53 am[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/index.css[22m
+[2m6:00:58 am[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/Settings.tsx, /src/index.css[22m
+[2m6:02:39 am[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/index.css[22m
+[2m6:12:13 am[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/Automations.tsx, /src/pages/Chat.tsx, /src/pages/CodingAnalytics.tsx, /src/pages/Dashboard.tsx, /src/pages/Memory.tsx, /src/pages/Settings.tsx, /src/index.css[22m
+[2m6:12:56 am[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/index.css[22m

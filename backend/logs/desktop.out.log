@@ -1,0 +1,9 @@
+
+> nexa@1.0.0 electron
+> npm --prefix desktop run electron
+
+
+> nexa-desktop@1.0.0 electron
+> electron .
+
+

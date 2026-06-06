@@ -1,0 +1,5 @@
+2026-06-06 05:23:18,607 INFO backend.main Starting Nexa API
+INFO:     Started server process [29092]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8010 (Press CTRL+C to quit)

@@ -1,0 +1,17 @@
+{
+  "name": "nexa",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install:all": "npm --prefix frontend install && npm --prefix desktop install",
+    "dev": "npm --prefix frontend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:desktop": "npm --prefix desktop run dev",
+    "electron": "npm --prefix desktop run electron",
+    "electron:dev": "npm --prefix desktop run electron:dev",
+    "electron:build": "npm --prefix desktop run electron:build",
+    "build:frontend": "npm --prefix frontend run build",
+    "test:backend": "python -m pytest tests/backend",
+    "backend": "python -m backend.run"
+  }
+}

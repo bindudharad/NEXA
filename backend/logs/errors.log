@@ -1,0 +1,40 @@
+2026-06-06 06:00:03,936 ERROR backend.core.task_manager Task failed
+Traceback (most recent call last):
+  File "C:\Programs\codex\BINDAS AGENT\backend\core\task_manager.py", line 68, in execute
+    agent = self._agent(plan.agent)
+  File "C:\Programs\codex\BINDAS AGENT\backend\core\task_manager.py", line 104, in _agent
+    raise ValueError(f"Unknown agent: {name}")
+ValueError: Unknown agent: unknown
+2026-06-06 06:00:03,958 ERROR nexa.tasks Task 42 failed: Unknown agent: unknown
+2026-06-06 06:02:46,931 ERROR backend.core.task_manager Task failed
+Traceback (most recent call last):
+  File "C:\Programs\codex\BINDAS AGENT\backend\core\task_manager.py", line 68, in execute
+    agent = self._agent(plan.agent)
+  File "C:\Programs\codex\BINDAS AGENT\backend\core\task_manager.py", line 104, in _agent
+    raise ValueError(f"Unknown agent: {name}")
+ValueError: Unknown agent: unknown
+2026-06-06 06:02:46,933 ERROR nexa.tasks Task 46 failed: Unknown agent: unknown
+2026-06-06 06:13:40,839 ERROR backend.core.task_manager Task failed
+Traceback (most recent call last):
+  File "C:\Programs\codex\BINDAS AGENT\backend\core\task_manager.py", line 68, in execute
+    agent = self._agent(plan.agent)
+  File "C:\Programs\codex\BINDAS AGENT\backend\core\task_manager.py", line 104, in _agent
+    raise ValueError(f"Unknown agent: {name}")
+ValueError: Unknown agent: unknown
+2026-06-06 06:13:40,843 ERROR nexa.tasks Task 50 failed: Unknown agent: unknown
+2026-06-06 06:16:58,061 ERROR backend.core.task_manager Task failed
+Traceback (most recent call last):
+  File "C:\Programs\codex\BINDAS AGENT\backend\core\task_manager.py", line 68, in execute
+    agent = self._agent(plan.agent)
+  File "C:\Programs\codex\BINDAS AGENT\backend\core\task_manager.py", line 104, in _agent
+    raise ValueError(f"Unknown agent: {name}")
+ValueError: Unknown agent: unknown
+2026-06-06 06:16:58,063 ERROR nexa.tasks Task 54 failed: Unknown agent: unknown
+2026-06-06 06:20:03,915 ERROR backend.core.task_manager Task failed
+Traceback (most recent call last):
+  File "C:\Programs\codex\BINDAS AGENT\backend\core\task_manager.py", line 68, in execute
+    agent = self._agent(plan.agent)
+  File "C:\Programs\codex\BINDAS AGENT\backend\core\task_manager.py", line 104, in _agent
+    raise ValueError(f"Unknown agent: {name}")
+ValueError: Unknown agent: unknown
+2026-06-06 06:20:03,917 ERROR nexa.tasks Task 58 failed: Unknown agent: unknown
