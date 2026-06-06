@@ -6,6 +6,19 @@ class CommandRequest(BaseModel):
     auto_confirm: bool = False
 
 
+class ApprovalEditRequest(BaseModel):
+    task_title: str | None = None
+    date: str | None = None
+    time: str | None = None
+    trigger: str | None = None
+    conditions: dict | None = None
+    priority: str | None = None
+
+
+class ApprovalRejectRequest(BaseModel):
+    reason: str = ""
+
+
 class MemoryRequest(BaseModel):
     key: str
     value: str
@@ -48,6 +61,54 @@ class BrowserDownloadRequest(BaseModel):
     destination: str | None = None
 
 
+class WebsiteAnalyzeRequest(BaseModel):
+    name: str
+    url: str
+    html: str | None = None
+    headless: bool = True
+
+
+class WebsiteProfileRequest(BaseModel):
+    name: str
+    url: str
+    field_mapping: dict = {}
+    navigation_rules: dict = {}
+    login_process: dict = {}
+    retry_policy: dict = {}
+    success_check: dict = {}
+    credentials: dict | None = None
+
+
+class WebsiteCredentialRequest(BaseModel):
+    credentials: dict
+    label: str = "default"
+
+
+class WebsiteActionRequest(BaseModel):
+    name: str
+    action: dict
+
+
+class WebsiteMonitoringRequest(BaseModel):
+    enabled: bool
+    interval_seconds: int = Field(default=300, ge=60)
+
+
+class WebsiteOpenRequest(BaseModel):
+    name: str
+
+
+class WebsiteImportRequest(BaseModel):
+    payload: dict
+
+
+class KcetResultRequest(BaseModel):
+    application_number: str | None = None
+    date_of_birth: str | None = None
+    save_profile: bool = False
+    url: str | None = None
+
+
 class BatteryAlertSettingsRequest(BaseModel):
     enabled: bool | None = None
     threshold_percent: int | None = Field(default=None, ge=1, le=100)
@@ -60,3 +121,21 @@ class BatteryAlertSettingsRequest(BaseModel):
 class BatterySimulationRequest(BaseModel):
     battery_percent: int | None = Field(default=None, ge=0, le=100)
     is_charging: bool | None = None
+
+
+class GpuMonitorSettingsRequest(BaseModel):
+    enabled: bool | None = None
+    threshold_celsius: int | None = Field(default=None, ge=1, le=120)
+    sound_enabled: bool | None = None
+    notification_enabled: bool | None = None
+    repeat_interval_seconds: int | None = Field(default=None, ge=30)
+
+
+class GpuSimulationRequest(BaseModel):
+    temperature_celsius: float = Field(ge=0, le=130)
+    usage_percent: float | None = Field(default=None, ge=0, le=100)
+    memory_usage_percent: float | None = Field(default=None, ge=0, le=100)
+
+
+class AutomationToggleRequest(BaseModel):
+    enabled: bool

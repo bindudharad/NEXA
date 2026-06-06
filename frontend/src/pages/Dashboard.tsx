@@ -1,11 +1,12 @@
 import React from "react";
-import { Activity, Cpu, HardDrive, RefreshCw, ShieldCheck } from "lucide-react";
-import { api, type BatteryAlertStatus, type Task } from "../lib/api";
+import { Activity, Cpu, HardDrive, Microchip, RefreshCw, ShieldCheck } from "lucide-react";
+import { api, type BatteryAlertStatus, type GpuMonitorStatus, type Task } from "../lib/api";
 import { Panel } from "../components/Panel";
 
 type DashboardData = {
   system: { cpu_percent: number; ram_percent: number; battery_percent: number | null };
   battery_alert: BatteryAlertStatus;
+  gpu_monitor: GpuMonitorStatus;
   tasks: Task[];
   automations: unknown[];
   notifications: { id: number; title: string; message: string }[];
@@ -26,8 +27,8 @@ export function Dashboard() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Metric icon={<Cpu size={18} />} label="CPU" value={`${data?.system.cpu_percent ?? 0}%`} />
         <Metric icon={<HardDrive size={18} />} label="RAM" value={`${data?.system.ram_percent ?? 0}%`} />
+        <Metric icon={<Microchip size={18} />} label="GPU" value={data?.gpu_monitor.usage_percent == null ? "N/A" : `${data.gpu_monitor.usage_percent}%`} />
         <Metric icon={<ShieldCheck size={18} />} label="Battery" value={data?.system.battery_percent == null ? "N/A" : `${data.system.battery_percent}%`} />
-        <Metric icon={<RefreshCw size={18} />} label="Automations" value={`${data?.automations.length ?? 0}`} />
       </div>
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.35fr_0.65fr]">
         <Panel title="Running Tasks">
@@ -75,6 +76,15 @@ export function Dashboard() {
           <Status icon={<Activity size={18} />} label="Charging Status" value={data?.battery_alert.is_charging == null ? "Unknown" : data.battery_alert.is_charging ? "Charging" : "Not charging"} />
           <Status icon={<RefreshCw size={18} />} label="Alert Status" value={data?.battery_alert.alert_active ? "Active" : "Idle"} />
           <Status icon={<Activity size={18} />} label="Last Alert Time" value={data?.battery_alert.last_alert_time ? new Date(data.battery_alert.last_alert_time).toLocaleTimeString() : "Never"} />
+        </div>
+      </Panel>
+      <Panel title="GPU Monitor">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <Status icon={<Microchip size={18} />} label="GPU Name" value={data?.gpu_monitor.gpu_name ?? "Unavailable"} />
+          <Status icon={<Activity size={18} />} label="GPU Usage" value={data?.gpu_monitor.usage_percent == null ? "N/A" : `${data.gpu_monitor.usage_percent}%`} />
+          <Status icon={<Activity size={18} />} label="GPU Temperature" value={data?.gpu_monitor.temperature_celsius == null ? "N/A" : `${data.gpu_monitor.temperature_celsius}°C`} />
+          <Status icon={<HardDrive size={18} />} label="VRAM Usage" value={data?.gpu_monitor.memory_usage_percent == null ? "N/A" : `${data.gpu_monitor.memory_usage_percent}%`} />
+          <Status icon={<ShieldCheck size={18} />} label="GPU Health Status" value={data?.gpu_monitor.health_status ?? "Unknown"} />
         </div>
       </Panel>
     </div>

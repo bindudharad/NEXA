@@ -13,10 +13,16 @@ def test_health():
     assert response.json()["service"] == "nexa"
 
 
-def test_memory_command_runs():
+def test_memory_command_requires_approval_before_execution():
     response = client.post("/api/commands", json={"command": "remember this preference"})
     assert response.status_code == 200
-    assert response.json()["status"] == "completed"
+    approval = response.json()
+    assert approval["status"] == "pending"
+    assert approval["corrected_text"] == "Remember this preference"
+    approved = client.post(f"/api/task-approvals/{approval['id']}/approve")
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
+    assert approved.json()["task"]["status"] == "completed"
 
 
 def test_dangerous_delete_endpoint_requires_confirmation():

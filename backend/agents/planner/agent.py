@@ -16,6 +16,7 @@ class PlannerAgent:
     """Rule-first planner with a clean seam for OpenAI/Ollama expansion."""
 
     dangerous_actions = {"delete_file", "delete_folder", "shutdown", "restart", "kill_process"}
+    desktop_apps = {"chrome", "google chrome", "vs code", "vscode", "visual studio code", "cursor", "notepad", "calculator", "spotify"}
 
     def plan(self, command: str) -> PlannedAction:
         text = command.strip()
@@ -51,7 +52,11 @@ class PlannerAgent:
             target = text[5:].strip()
             if "." in target or target.lower() in {"github", "google", "stackoverflow", "stack overflow"}:
                 return PlannedAction("open_website", "browser", "open_url", {"target": target})
+            if target.lower() not in self.desktop_apps:
+                return PlannedAction("open_website_profile", "website", "open_profile", {"name": target}, requires_confirmation=True)
             return PlannedAction("launch_application", "system", "launch_app", {"name": target})
+        if match := re.search(r"(?:login to|show|check|open) (kcet|college|contineo|gmail|github|attendance|internal marks|exam results|marks card)(?: result| results)?", lower):
+            return PlannedAction("website_profile_action", "website", "open_profile", {"name": match.group(1)}, requires_confirmation=True)
         if lower.startswith("search google for "):
             return PlannedAction("google_search", "browser", "search_google", {"query": text[18:].strip()})
         if match := re.search(r"create (?:a )?file (?:called |named )?(.+)", lower):

@@ -13,6 +13,7 @@ from backend.agents.memory import MemoryAgent
 from backend.agents.planner import PlannerAgent, PlannedAction
 from backend.agents.scheduler import SchedulerAgent
 from backend.agents.system import SystemAgent
+from backend.agents.website import WebsiteAgent
 from backend.database.models import Task, TaskExecution, TaskStatus
 
 logger = logging.getLogger(__name__)
@@ -101,4 +102,6 @@ class TaskManager:
             return self.scheduler
         if name == "memory":
             return MemoryAgent(self.db)
+        if name == "website":
+            return WebsiteAgent(self.db)
         raise ValueError(f"Unknown agent: {name}")

@@ -6,91 +6,431 @@
     <title>Nexa</title>
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src http://127.0.0.1:*" />
     <style>
+      :root {
+        color-scheme: dark;
+        --bg: rgba(7, 10, 17, 0.78);
+        --panel: rgba(15, 23, 42, 0.82);
+        --panel-strong: rgba(8, 11, 18, 0.94);
+        --line: rgba(247, 213, 138, 0.18);
+        --line-strong: rgba(247, 213, 138, 0.34);
+        --gold: #f2b84b;
+        --gold-soft: #f7d58a;
+        --ink: #f8fafc;
+        --muted: #94a3b8;
+        --scale: 1;
+      }
+
+      body.large {
+        --scale: 1.12;
+      }
+
+      body.contrast {
+        --line: rgba(247, 213, 138, 0.42);
+        --line-strong: rgba(247, 213, 138, 0.76);
+        --panel: rgba(0, 0, 0, 0.92);
+        --muted: #dbe2ef;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
       html,
       body {
         margin: 0;
         width: 100%;
         height: 100%;
+        overflow: hidden;
         background: transparent;
         font-family: Inter, Segoe UI, system-ui, sans-serif;
+        user-select: none;
       }
-      .bubble {
-        width: 72px;
-        height: 72px;
-        display: grid;
-        place-items: center;
-        border-radius: 50%;
-        background: linear-gradient(145deg, #f7d58a, #f2b84b);
-        color: #080b12;
-        font-size: 30px;
-        cursor: pointer;
-        -webkit-app-region: drag;
-        box-shadow: 0 18px 44px rgba(242, 184, 75, 0.28);
-      }
-      .panel {
-        width: 320px;
-        height: 420px;
-        overflow: hidden;
-        border: 1px solid rgba(247, 213, 138, 0.22);
-        border-radius: 8px;
-        background: rgba(8, 11, 18, 0.9);
-        color: #f8fafc;
-        backdrop-filter: blur(18px);
-        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.42);
-      }
-      .title {
-        height: 46px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 0 12px;
-        background: linear-gradient(135deg, #111827, #1f2937);
-        color: #f7d58a;
-        -webkit-app-region: drag;
-      }
+
       button,
-      input {
+      input,
+      select,
+      textarea {
         -webkit-app-region: no-drag;
         font: inherit;
       }
-      .content {
+
+      button {
+        cursor: pointer;
+      }
+
+      .stage {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+      }
+
+      .drag {
+        -webkit-app-region: drag;
+      }
+
+      .bubble {
+        position: absolute;
+        left: 10px;
+        top: 10px;
+        width: calc(76px * var(--scale));
+        height: calc(76px * var(--scale));
+        display: grid;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 999px;
+        background:
+          radial-gradient(circle at 35% 28%, #fff2c4, transparent 30%),
+          linear-gradient(145deg, #f7d58a, #f2b84b 58%, #bf7c16);
+        color: #080b12;
+        font-size: 32px;
+        font-weight: 900;
+        letter-spacing: 0;
+        box-shadow: 0 20px 52px rgba(242, 184, 75, 0.38), inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+        transition: transform 180ms ease, box-shadow 180ms ease;
+      }
+
+      .bubble:hover {
+        transform: translateY(-1px) scale(1.03);
+        box-shadow: 0 26px 68px rgba(242, 184, 75, 0.48), inset 0 0 0 1px rgba(255, 255, 255, 0.24);
+      }
+
+      .bubble-status {
+        position: absolute;
+        right: 13px;
+        bottom: 13px;
+        width: 14px;
+        height: 14px;
+        border: 2px solid #111827;
+        border-radius: 999px;
+        background: #34d399;
+      }
+
+      .radial-shell {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        border-radius: 28px;
+        background:
+          radial-gradient(circle at 50% 50%, rgba(242, 184, 75, 0.18), transparent 34%),
+          radial-gradient(circle at 20% 12%, rgba(247, 213, 138, 0.15), transparent 26%);
+        backdrop-filter: blur(10px);
+      }
+
+      .center-orb {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        z-index: 3;
+        display: grid;
+        width: calc(138px * var(--scale));
+        height: calc(138px * var(--scale));
+        place-items: center;
+        transform: translate(-50%, -50%);
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        background: rgba(8, 11, 18, 0.88);
+        color: var(--gold-soft);
+        box-shadow: 0 18px 60px rgba(0, 0, 0, 0.38), inset 0 0 42px rgba(242, 184, 75, 0.14);
+        text-align: center;
+      }
+
+      .center-orb strong {
+        display: block;
+        color: var(--gold);
+        font-size: 24px;
+      }
+
+      .center-orb span {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .center-close {
+        position: absolute;
+        right: 5px;
+        top: 5px;
+        display: grid;
+        width: 30px;
+        height: 30px;
+        place-items: center;
+        border: 1px solid rgba(247, 213, 138, 0.28);
+        border-radius: 999px;
+        background: rgba(0, 0, 0, 0.42);
+        color: var(--gold-soft);
+        font-weight: 800;
+      }
+
+      .radial-item {
+        position: absolute;
+        left: calc(50% + var(--x));
+        top: calc(50% + var(--y));
+        display: grid;
+        width: calc(92px * var(--scale));
+        height: calc(92px * var(--scale));
+        place-items: center;
+        transform: translate(-50%, -50%);
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        background: rgba(15, 23, 42, 0.78);
+        color: var(--ink);
+        box-shadow: 0 18px 42px rgba(0, 0, 0, 0.32);
+        animation: orbitIn 240ms ease both;
+        animation-delay: var(--delay, 0ms);
+        transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+      }
+
+      .radial-item:hover {
+        transform: translate(-50%, -50%) scale(1.06);
+        border-color: var(--line-strong);
+        background: rgba(27, 36, 55, 0.92);
+      }
+
+      .radial-icon {
+        display: grid;
+        width: 36px;
+        height: 36px;
+        place-items: center;
+        border-radius: 12px;
+        background: rgba(242, 184, 75, 0.18);
+        color: var(--gold-soft);
+        font-weight: 800;
+        font-size: 18px;
+      }
+
+      .radial-label {
+        max-width: 78px;
+        overflow: hidden;
+        color: #dbe2ef;
+        font-size: 11px;
+        text-align: center;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .radial-reason {
+        max-width: 78px;
+        overflow: hidden;
+        color: var(--muted);
+        font-size: 9px;
+        text-align: center;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      @keyframes orbitIn {
+        from {
+          opacity: 0;
+          transform: translate(-50%, -50%) scale(0.72);
+        }
+        to {
+          opacity: 1;
+          transform: translate(-50%, -50%) scale(1);
+        }
+      }
+
+      .panel {
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        background:
+          radial-gradient(circle at 10% 0%, rgba(242, 184, 75, 0.16), transparent 28%),
+          linear-gradient(135deg, rgba(8, 11, 18, 0.96), rgba(15, 23, 42, 0.92));
+        color: var(--ink);
+        backdrop-filter: blur(20px);
+        box-shadow: 0 28px 78px rgba(0, 0, 0, 0.48);
+      }
+
+      .warning {
+        margin-bottom: 10px;
+        border: 1px solid rgba(248, 113, 113, 0.44);
+        border-radius: 16px;
+        background: rgba(127, 29, 29, 0.34);
+        color: #fecaca;
         padding: 12px;
       }
-      input {
-        width: 100%;
-        height: 38px;
-        border: 1px solid rgba(247, 213, 138, 0.24);
-        border-radius: 6px;
-        padding: 0 10px;
-        background: rgba(255, 255, 255, 0.06);
-        color: #f8fafc;
+
+      .suggestions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
       }
-      .send {
-        margin-top: 8px;
-        width: 100%;
-        height: 36px;
-        border: 0;
-        border-radius: 6px;
-        background: #f2b84b;
-        color: #080b12;
+
+      .panel-head {
+        display: flex;
+        height: 58px;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--line);
+        padding: 0 16px;
       }
-      .status {
-        margin-top: 12px;
-        min-height: 110px;
-        border: 1px solid rgba(247, 213, 138, 0.18);
-        border-radius: 6px;
+
+      .panel-title {
+        min-width: 0;
+      }
+
+      .panel-title strong {
+        display: block;
+        color: var(--gold-soft);
+        font-size: 16px;
+      }
+
+      .panel-title span {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .head-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .icon-button {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--gold-soft);
+      }
+
+      .panel-body {
+        height: calc(100vh - 58px);
+        overflow: auto;
+        padding: 14px;
+      }
+
+      .grid {
+        display: grid;
+        gap: 10px;
+      }
+
+      .cols-2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .cols-3 {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .card {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.055);
+        padding: 12px;
+      }
+
+      .label {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .value {
+        margin-top: 4px;
+        overflow-wrap: anywhere;
+        color: var(--ink);
+        font-size: 17px;
+        font-weight: 700;
+      }
+
+      .small {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.04);
         padding: 10px;
-        color: #dbe2ef;
-        font-size: 13px;
+      }
+
+      .pill {
+        border: 1px solid rgba(242, 184, 75, 0.24);
+        border-radius: 999px;
+        padding: 5px 8px;
+        color: var(--gold-soft);
+        font-size: 11px;
+      }
+
+      .button {
+        height: 34px;
+        border: 0;
+        border-radius: 12px;
+        background: var(--gold);
+        color: #080b12;
+        font-weight: 700;
+        padding: 0 12px;
+      }
+
+      .ghost {
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--gold-soft);
+      }
+
+      .field,
+      .select {
+        width: 100%;
+        height: 40px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--ink);
+        padding: 0 12px;
+        outline: none;
+      }
+
+      .chat-log {
+        display: grid;
+        max-height: 350px;
+        gap: 10px;
+        overflow: auto;
+        padding-right: 4px;
+      }
+
+      .message {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.055);
+        padding: 10px;
         white-space: pre-wrap;
       }
-      .min {
-        border: 0;
-        background: rgba(247, 213, 138, 0.14);
-        color: #f7d58a;
-        border-radius: 4px;
-        width: 28px;
-        height: 28px;
+
+      .message strong {
+        color: var(--gold-soft);
+      }
+
+      .empty {
+        display: grid;
+        min-height: 160px;
+        place-items: center;
+        border: 1px dashed var(--line);
+        border-radius: 16px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      @media (max-width: 520px) {
+        .cols-2,
+        .cols-3 {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
@@ -98,37 +438,636 @@
     <div id="root"></div>
     <script>
       const root = document.getElementById("root");
-      let expanded = false;
+      const permanentModules = [
+        { id: "chat", label: "Chat", icon: "💬", reason: "Always ready" },
+        { id: "tasks", label: "Tasks", icon: "📋", reason: "Always visible" }
+      ];
+      const state = {
+        view: "bubble",
+        panel: "status",
+        taps: 0,
+        dashboard: null,
+        coding: null,
+        weekly: null,
+        batterySettings: null,
+        chat: [{ who: "Nexa", text: "Nexa Active" }],
+        loading: false,
+        large: false,
+        contrast: false,
+        error: ""
+      };
 
-      function render() {
-        root.innerHTML = expanded
-          ? `<div class="panel"><div class="title"><strong>Nexa</strong><button class="min" id="min">-</button></div><div class="content"><input id="command" placeholder="Type command..." /><button class="send" id="send">Run</button><div class="status" id="status">Nexa Active</div></div></div>`
-          : `<div class="bubble" id="bubble">N</div>`;
-        window.nexa.resize(expanded);
-        if (expanded) {
-          document.getElementById("min").onclick = () => {
-            expanded = false;
-            render();
+      function resize(mode) {
+        window.nexa.resize(mode);
+      }
+
+      function setView(view, panel) {
+        state.view = view;
+        if (panel) state.panel = panel;
+        render();
+        resize(view === "bubble" ? "bubble" : view === "radial" ? "radial" : view === "chat" ? "chat" : "panel");
+        if (view !== "bubble") refresh();
+      }
+
+      function fmt(value, suffix) {
+        if (value === null || value === undefined || Number.isNaN(value)) return "N/A";
+        return suffix ? `${value}${suffix}` : String(value);
+      }
+
+      function secs(value) {
+        if (!value || value < 0 || value === 4294967295) return "Unknown";
+        const hours = Math.floor(value / 3600);
+        const minutes = Math.floor((value % 3600) / 60);
+        return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+      }
+
+      function batteryHealth(percent) {
+        if (percent === null || percent === undefined) return "Unknown";
+        if (percent >= 50) return "Good";
+        if (percent >= 20) return "Fair";
+        return "Low";
+      }
+
+      function activeRadialModules() {
+        const dashboard = state.dashboard || {};
+        const system = dashboard.system || {};
+        const context = system.context || {};
+        const alert = dashboard.battery_alert || {};
+        const automations = dashboard.automations || [];
+        const activeTasks = (dashboard.tasks || []).filter((task) => ["created", "running", "pending_confirmation"].includes(task.status)).length;
+        const activeAutomations = automations.filter((item) => item.enabled).length;
+        const dynamic = [];
+        if (context.vscode_open || context.cursor_open || context.git_active) {
+          dynamic.push({
+            id: "coding",
+            label: context.git_active ? "Git Active" : context.cursor_open ? "Cursor" : "VS Code",
+            icon: context.git_active ? "🌿" : context.cursor_open ? "⚡" : "💻",
+            reason: context.git_active ? "Git operation" : "Coding app"
+          });
+        }
+        if (context.chrome_open) {
+          dynamic.push({ id: "browser", label: "Chrome", icon: "🌐", reason: "Browser open" });
+        }
+        if (context.spotify_open) {
+          dynamic.push({ id: "media", label: "Spotify", icon: "🎵", reason: "Media open" });
+        }
+        if (context.downloads_active) {
+          dynamic.push({ id: "files", label: "Downloads", icon: "⬇", reason: "Download active" });
+        }
+        if (alert.alert_active || ((alert.battery_percent ?? system.battery_percent) <= 20 && !(alert.is_charging ?? system.battery_plugged))) {
+          dynamic.push({ id: "battery", label: "Battery Low", icon: "🔋", reason: "Needs charge" });
+        }
+        if (context.system_attention) {
+          dynamic.push({ id: "system", label: "Alert", icon: "🚨", reason: "High load" });
+        }
+        if (activeAutomations > 0) {
+          dynamic.push({ id: "automation", label: "Automation", icon: "⚙", reason: `${activeAutomations} enabled` });
+        }
+        if (activeTasks > 0) {
+          dynamic.push({ id: "tasks", label: "Active Tasks", icon: "TK", reason: `${activeTasks} active` });
+        }
+        const merged = [...permanentModules, ...dynamic];
+        return merged.filter((item, index, all) => all.findIndex((candidate) => candidate.id === item.id) === index);
+      }
+
+      function placeModules(items) {
+        const radius = items.length <= 4 ? 180 : 230;
+        const start = -90;
+        return items.map((item, index) => {
+          const angle = ((start + (360 / items.length) * index) * Math.PI) / 180;
+          return {
+            ...item,
+            x: Math.round(Math.cos(angle) * radius),
+            y: Math.round(Math.sin(angle) * radius),
+            delay: index * 22
           };
-          document.getElementById("send").onclick = async () => {
-            const input = document.getElementById("command");
-            const status = document.getElementById("status");
-            status.textContent = "Running...";
-            try {
-              const result = await window.nexa.command(input.value);
-              status.textContent = JSON.stringify(result, null, 2);
-            } catch (error) {
-              status.textContent = String(error);
-            }
-          };
-        } else {
-          document.getElementById("bubble").onclick = () => {
-            expanded = true;
-            render();
-          };
+        });
+      }
+
+      async function refresh() {
+        try {
+          state.dashboard = await window.nexa.api("/dashboard");
+          if (state.panel === "coding") {
+            state.coding = await window.nexa.api("/coding/report");
+            state.weekly = await window.nexa.api("/coding/weekly-report");
+          }
+          if (state.panel === "battery" || state.panel === "settings") {
+            state.batterySettings = await window.nexa.api("/battery-alert/settings");
+          }
+          state.error = "";
+        } catch (error) {
+          state.error = String(error.message || error);
+        }
+        render();
+      }
+
+      function speak(text) {
+        if (!("speechSynthesis" in window)) return;
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+      }
+
+      async function sendCommand() {
+        const input = document.getElementById("command");
+        const command = input.value.trim();
+        if (!command) return;
+        state.chat.push({ who: "User", text: command });
+        input.value = "";
+        state.loading = true;
+        render();
+        try {
+          const result = await window.nexa.command(command);
+          state.chat.push({ who: "Nexa", text: `${result.status || "completed"}: ${result.agent || "task"} / ${result.intent || "command"}` });
+          speak(`Task ${result.status || "completed"}`);
+          await refresh();
+        } catch (error) {
+          state.chat.push({ who: "Nexa", text: String(error.message || error) });
+        } finally {
+          state.loading = false;
+          render();
         }
       }
+
+      async function createQuickAutomation() {
+        const name = document.getElementById("automation-name")?.value.trim() || "Nexa quick automation";
+        const metric = document.getElementById("automation-metric")?.value || "battery";
+        const value = Number(document.getElementById("automation-value")?.value || 20);
+        await window.nexa.api("/automations", {
+          method: "POST",
+          body: {
+            name,
+            condition: { metric, operator: metric === "battery" ? "<=" : ">", value },
+            action: { type: "notify", message: `${metric} condition reached` }
+          }
+        });
+        state.chat.push({ who: "Nexa", text: `Automation created: ${name}` });
+        await refresh();
+      }
+
+      function startVoiceCommand() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+          state.chat.push({ who: "Nexa", text: "Voice command capture is ready for supported Chromium speech engines." });
+          render();
+          return;
+        }
+        const recognition = new SpeechRecognition();
+        recognition.lang = "en-US";
+        recognition.interimResults = false;
+        recognition.onresult = (event) => {
+          const transcript = event.results?.[0]?.[0]?.transcript || "";
+          const input = document.getElementById("command");
+          if (input) input.value = transcript;
+        };
+        recognition.onerror = () => {
+          state.chat.push({ who: "Nexa", text: "Voice capture failed. Text command mode remains active." });
+          render();
+        };
+        recognition.start();
+      }
+
+      async function updateBatterySettings(patch) {
+        state.batterySettings = await window.nexa.api("/battery-alert/settings", { method: "PUT", body: patch });
+        render();
+      }
+
+      async function toggleAutomation(id, enabled) {
+        await window.nexa.api(`/automations/${id}/toggle`, { method: "PUT", body: { enabled } });
+        await refresh();
+      }
+
+      async function taskAction(id, action) {
+        await window.nexa.api(`/tasks/${id}/${action}`, { method: "POST" });
+        await refresh();
+      }
+
+      function renderShell(title, subtitle, body) {
+        return `
+          <div class="panel">
+            <div class="panel-head drag">
+              <div class="panel-title"><strong>${title}</strong><span>${subtitle}</span></div>
+              <div class="head-actions">
+                <button class="icon-button" id="to-radial" title="Radial menu">R</button>
+                <button class="icon-button" id="to-bubble" title="Minimize">-</button>
+              </div>
+            </div>
+            <div class="panel-body">${state.error ? `<div class="card small">${state.error}</div>` : ""}${body}</div>
+          </div>`;
+      }
+
+      function card(label, value) {
+        return `<div class="card"><div class="label">${label}</div><div class="value">${value}</div></div>`;
+      }
+
+      function renderBattery() {
+        const system = state.dashboard?.system || {};
+        const alert = state.dashboard?.battery_alert || {};
+        const settings = state.batterySettings || {};
+        const batteryPercent = alert.battery_percent ?? system.battery_percent;
+        return renderShell("Battery", "Power status and low battery automation", `
+          ${alert.alert_active ? `<div class="warning"><strong>Low Battery Warning</strong><br>Only ${alert.battery_percent}% battery remaining. Please connect your charger.</div>` : ""}
+          <div class="grid cols-3">
+            ${card("Battery %", fmt(batteryPercent, "%"))}
+            ${card("Battery Health", batteryHealth(batteryPercent))}
+            ${card("Charging", alert.is_charging ?? system.battery_plugged ? "Yes" : "No")}
+            ${card("Time Remaining", secs(system.battery_secs_left))}
+            ${card("Battery Saver", typeof batteryPercent === "number" && batteryPercent <= 20 ? "Recommended" : "Normal")}
+            ${card("Power Mode", system.battery_plugged ? "AC Power" : "Battery")}
+            ${card("Temperature", fmt(system.temperature_celsius, " C"))}
+            ${card("Alert Status", alert.alert_active ? "Active" : "Idle")}
+          </div>
+          <div class="card" style="margin-top:10px">
+            <div class="label">Low Battery Alert Settings</div>
+            <div class="grid cols-3" style="margin-top:10px">
+              <button class="button ${settings.enabled ? "" : "ghost"}" id="alert-enabled">${settings.enabled ? "Enabled" : "Disabled"}</button>
+              <select class="select" id="threshold">
+                ${[10, 15, 20, 25, 30].map((value) => `<option value="${value}" ${settings.threshold_percent === value ? "selected" : ""}>${value}% threshold</option>`).join("")}
+              </select>
+              <select class="select" id="repeat">
+                ${[
+                  [60, "Repeat 1 minute"],
+                  [120, "Repeat 2 minutes"],
+                  [300, "Repeat 5 minutes"],
+                  [600, "Repeat 10 minutes"]
+                ].map(([value, label]) => `<option value="${value}" ${settings.repeat_interval_seconds === value ? "selected" : ""}>${label}</option>`).join("")}
+              </select>
+            </div>
+          </div>`);
+      }
+
+      function renderSystem() {
+        const system = state.dashboard?.system || {};
+        return renderShell("System Health", "Live computer telemetry", `
+          <div class="grid cols-3">
+            ${card("CPU Usage", fmt(system.cpu_percent, "%"))}
+            ${card("RAM Usage", fmt(system.ram_percent, "%"))}
+            ${card("Disk Usage", fmt(system.disk_percent, "%"))}
+            ${card("GPU Usage", fmt(system.gpu_percent, "%"))}
+            ${card("Temperature", fmt(system.temperature_celsius, " C"))}
+            ${card("Process Count", fmt(system.process_count))}
+            ${card("Network Sent", fmt(Math.round((system.network_bytes_sent || 0) / 1048576), " MB"))}
+            ${card("Network Received", fmt(Math.round((system.network_bytes_recv || 0) / 1048576), " MB"))}
+            ${card("Health Score", fmt(system.health_score, "/100"))}
+          </div>`);
+      }
+
+      function renderCoding() {
+        const report = state.coding || {};
+        const weekly = state.weekly || {};
+        const apps = report.apps || {};
+        return renderShell("Coding Analytics", "Development activity and project focus", `
+          <div class="grid cols-3">
+            ${card("Today's Coding Time", report.total_time || "0h 0m")}
+            ${card("VS Code Time", apps["VS Code"] || apps["Code"] || "0h 0m")}
+            ${card("Cursor Time", apps.Cursor || "0h 0m")}
+            ${card("Files Modified", fmt(report.files_modified || 0))}
+            ${card("Commits Made", fmt(report.commits || 0))}
+            ${card("Weekly Statistics", weekly.total_time || "0h 0m")}
+            ${card("Monthly Statistics", "Ready")}
+            ${card("Productivity", report.commits || report.files_modified ? "Active" : "No activity")}
+            ${card("Heatmaps", "Ready")}
+          </div>
+          <div class="card" style="margin-top:10px">
+            <div class="label">Projects Worked On</div>
+            <div class="value">${(report.projects || []).join(", ") || "No projects recorded"}</div>
+          </div>`);
+      }
+
+      function renderTasks() {
+        const tasks = state.dashboard?.tasks || [];
+        const jobs = state.dashboard?.scheduled_jobs || [];
+        const completed = tasks.filter((task) => task.status === "completed").length;
+        const failed = tasks.filter((task) => task.status === "failed").length;
+        const queued = tasks.filter((task) => task.status === "created" || task.status === "pending_confirmation").length;
+        const running = tasks.filter((task) => task.status === "running").length;
+        return renderShell("Tasks", "Running, scheduled, completed, and failed work", `
+          <div class="grid cols-3">
+            ${card("Running Tasks", running)}
+            ${card("Scheduled Tasks", jobs.length)}
+            ${card("Queued Tasks", queued)}
+            ${card("Completed Tasks", completed)}
+            ${card("Failed Tasks", failed)}
+            ${card("Automation Status", `${(state.dashboard?.automations || []).filter((item) => item.enabled).length} enabled`)}
+          </div>
+          <div class="list" style="margin-top:10px">
+            ${tasks.length ? tasks.map((task) => `
+              <div class="row">
+                <div><div class="small">${task.command}</div><span class="pill">${task.status}</span></div>
+                <div>
+                  <button class="button ghost" data-task="${task.id}" data-action="pause">Pause</button>
+                  <button class="button ghost" data-task="${task.id}" data-action="resume">Resume</button>
+                  <button class="button ghost" data-task="${task.id}" data-action="cancel">Cancel</button>
+                  <button class="button" data-task="${task.id}" data-action="retry">Retry</button>
+                </div>
+              </div>`).join("") : `<div class="empty">No tasks recorded</div>`}
+          </div>`);
+      }
+
+      function renderFiles() {
+        const folders = [
+          ["downloads", "Downloads"],
+          ["documents", "Documents"],
+          ["desktop", "Desktop"],
+          ["projects", "Projects"]
+        ];
+        return renderShell("Files", "Quick access folders and workspace shortcuts", `
+          <div class="grid cols-2">
+            ${folders.map(([key, label]) => `<button class="card" data-folder="${key}"><div class="label">Open Folder</div><div class="value">${label}</div></button>`).join("")}
+          </div>
+          <div class="card" style="margin-top:10px">
+            <div class="label">Recent Files</div>
+            <div class="small">Recent files, pinned files, and quick actions are wired for activity log expansion.</div>
+          </div>`);
+      }
+
+      function renderBrowser() {
+        return renderShell("Chrome Context", "Browser-aware quick actions", `
+          <div class="grid cols-2">
+            ${card("Chrome", "Open")}
+            ${card("Context", "Browser automation ready")}
+          </div>
+          <div class="card" style="margin-top:10px">
+            <div class="label">Quick Command</div>
+            <button class="button" id="automate-chrome">Ask Nexa to automate Chrome</button>
+          </div>`);
+      }
+
+      function renderMedia() {
+        return renderShell("Spotify Context", "Media app detected", `
+          <div class="grid cols-2">
+            ${card("Spotify", "Open")}
+            ${card("Control", "Voice command ready")}
+          </div>`);
+      }
+
+      function renderAutomation() {
+        const automations = state.dashboard?.automations || [];
+        return renderShell("Automation", "Active automation rules and system triggers", `
+          <div class="grid cols-3">
+            ${card("Active Automations", automations.filter((item) => item.enabled).length)}
+            ${card("Battery Automations", automations.filter((item) => item.condition?.metric === "battery").length)}
+            ${card("Custom Automations", automations.length)}
+            ${card("Triggers", automations.filter((item) => item.condition?.event_type).length)}
+            ${card("Schedules", state.dashboard?.scheduled_jobs?.length || 0)}
+            ${card("Automation Logs", "Available")}
+          </div>
+          <div class="list" style="margin-top:10px">
+            ${automations.length ? automations.map((item) => `
+              <div class="row">
+                <div><div class="small">${item.name}</div><span class="pill">${item.enabled ? "Enabled" : "Disabled"}</span></div>
+                <button class="button ${item.enabled ? "ghost" : ""}" data-auto="${item.id}" data-enabled="${!item.enabled}">${item.enabled ? "Disable" : "Enable"}</button>
+              </div>`).join("") : `<div class="empty">No automations created</div>`}
+          </div>`);
+      }
+
+      function renderSettings() {
+        const settings = state.batterySettings || {};
+        return renderShell("Settings", "Theme, voice, notifications, AI provider, and preferences", `
+          <div class="grid cols-2">
+            ${card("Theme", "Premium Dark")}
+            ${card("Notifications", settings.notification_enabled ? "Enabled" : "Disabled")}
+            ${card("Voice", settings.voice_enabled ? "Ready" : "Disabled")}
+            ${card("Sound", settings.sound_enabled ? "Enabled" : "Disabled")}
+            ${card("Battery Alerts", settings.enabled ? `${settings.threshold_percent}%` : "Disabled")}
+            ${card("AI Provider", "OpenAI / Ollama ready")}
+            ${card("Large Mode", state.large ? "Enabled" : "Disabled")}
+            ${card("High Contrast", state.contrast ? "Enabled" : "Disabled")}
+          </div>
+          <div class="card" style="margin-top:10px">
+            <button class="button" id="open-dashboard">Open Nexa Dashboard</button>
+            <button class="button ghost" id="large-mode">Large Mode</button>
+            <button class="button ghost" id="contrast-mode">High Contrast</button>
+          </div>`);
+      }
+
+      function renderChat() {
+        return renderShell("Nexa Chat", "Natural language commands and execution feedback", `
+          <div class="chat-log">
+            ${state.chat.map((msg) => `<div class="message"><strong>${msg.who}</strong><br>${msg.text}</div>`).join("")}
+            ${state.loading ? `<div class="message"><strong>Nexa</strong><br>Running...</div>` : ""}
+          </div>
+          <div class="suggestions">
+            ${["Open Chrome", "Show system health", "Create low battery automation", "Backup project tonight"].map((item) => `<button class="button ghost" data-suggestion="${item}">${item}</button>`).join("")}
+          </div>
+          <div class="grid" style="grid-template-columns:minmax(0,1fr) 82px 82px;margin-top:10px">
+            <input class="field" id="command" placeholder="Type command..." />
+            <button class="button" id="send">Send</button>
+            <button class="button ghost" id="voice">Voice</button>
+          </div>
+          <div class="card" style="margin-top:10px">
+            <div class="label">Create Automation</div>
+            <div class="grid" style="grid-template-columns:minmax(0,1fr) 116px 86px 82px;margin-top:8px">
+              <input class="field" id="automation-name" placeholder="Automation name" />
+              <select class="select" id="automation-metric">
+                <option value="battery">Battery</option>
+                <option value="cpu">CPU</option>
+                <option value="ram">RAM</option>
+              </select>
+              <input class="field" id="automation-value" inputmode="numeric" value="20" />
+              <button class="button" id="create-auto">Create</button>
+            </div>
+          </div>`);
+      }
+
+      function renderStatus() {
+        const alert = state.dashboard?.battery_alert || {};
+        const system = state.dashboard?.system || {};
+        return renderShell("Status", "Nexa Active", `
+          <div class="grid cols-3">
+            ${card("Battery", fmt(alert.battery_percent ?? system.battery_percent, "%"))}
+            ${card("CPU", fmt(system.cpu_percent, "%"))}
+            ${card("RAM", fmt(system.ram_percent, "%"))}
+            ${card("Alert", alert.alert_active ? "Active" : "Idle")}
+            ${card("Tasks", (state.dashboard?.tasks || []).length)}
+            ${card("Automations", (state.dashboard?.automations || []).length)}
+          </div>`);
+      }
+
+      function renderPanel() {
+        const views = {
+          battery: renderBattery,
+          system: renderSystem,
+          coding: renderCoding,
+          tasks: renderTasks,
+          files: renderFiles,
+          browser: renderBrowser,
+          media: renderMedia,
+          automation: renderAutomation,
+          chat: renderChat,
+          settings: renderSettings,
+          status: renderStatus
+        };
+        root.innerHTML = (views[state.panel] || renderStatus)();
+        bindPanel();
+      }
+
+      function renderRadial() {
+        const items = placeModules(activeRadialModules());
+        root.innerHTML = `
+          <div class="radial-shell">
+            <div class="center-orb" id="status-panel" role="button" aria-label="Nexa status hub">
+              <button class="center-close" id="center-close" title="Close" aria-label="Close orbital menu">×</button>
+              <div><strong>NEXA</strong><span>Nexa Active</span></div>
+            </div>
+            ${items.map((item) => `
+              <button class="radial-item" data-panel="${item.id}" aria-label="${item.label}" style="--x:${item.x}px;--y:${item.y}px;--delay:${item.delay}ms">
+                <span class="radial-icon">${item.icon}</span>
+                <span class="radial-label">${item.label}</span>
+                <span class="radial-reason">${item.reason}</span>
+              </button>`).join("")}
+          </div>`;
+        bindRadial();
+      }
+
+      function renderBubble() {
+        root.innerHTML = `<button class="bubble" id="bubble" title="Nexa" aria-label="Open Nexa Orbital Assistant">N<span class="bubble-status"></span></button>`;
+        const bubble = document.getElementById("bubble");
+        bubble.onclick = () => {
+          if (bubble.dataset.dragMoved === "true") return;
+          setView("radial");
+        };
+        bubble.ondblclick = () => {
+          if (bubble.dataset.dragMoved === "true") return;
+          setView("chat", "chat");
+        };
+        bubble.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+          window.nexa.contextMenu();
+        });
+        bindManualDrag(bubble, () => {
+          state.taps += 1;
+          setView("radial");
+        }, () => setView("chat", "chat"));
+      }
+
+      function bindRadial() {
+        document.querySelectorAll("[data-panel]").forEach((button) => {
+          button.addEventListener("click", () => setView(button.dataset.panel === "chat" ? "chat" : "panel", button.dataset.panel));
+        });
+        const statusPanel = document.getElementById("status-panel");
+        document.getElementById("center-close")?.addEventListener("click", (event) => {
+          event.stopPropagation();
+          setView("bubble");
+        });
+        bindManualDrag(statusPanel, () => setView("panel", "status"));
+        document.body.oncontextmenu = (event) => {
+          event.preventDefault();
+          window.nexa.contextMenu();
+        };
+      }
+
+      function bindManualDrag(element, onTap, onDoubleTap) {
+        let dragging = false;
+        let moved = false;
+        let lastX = 0;
+        let lastY = 0;
+        let lastTap = 0;
+        let tapTimer = null;
+        element.addEventListener("mousedown", (event) => {
+          if (event.button !== 0) return;
+          dragging = true;
+          moved = false;
+          lastX = event.screenX;
+          lastY = event.screenY;
+          event.preventDefault();
+        });
+        window.addEventListener("mousemove", (event) => {
+          if (!dragging) return;
+          const deltaX = event.screenX - lastX;
+          const deltaY = event.screenY - lastY;
+          if (Math.abs(deltaX) + Math.abs(deltaY) > 0) {
+            moved = true;
+            element.dataset.dragMoved = "true";
+            window.nexa.moveBy(deltaX, deltaY);
+            lastX = event.screenX;
+            lastY = event.screenY;
+          }
+        });
+        window.addEventListener("mouseup", () => {
+          if (!dragging) return;
+          dragging = false;
+          if (moved) {
+            setTimeout(() => {
+              moved = false;
+              element.dataset.dragMoved = "false";
+            }, 80);
+          } else if (onTap) {
+            const now = Date.now();
+            if (onDoubleTap && now - lastTap < 320) {
+              clearTimeout(tapTimer);
+              tapTimer = null;
+              lastTap = 0;
+              onDoubleTap();
+            } else {
+              lastTap = now;
+              tapTimer = setTimeout(() => {
+                tapTimer = null;
+                onTap();
+              }, onDoubleTap ? 220 : 0);
+            }
+          }
+        });
+      }
+
+      function bindPanel() {
+        document.getElementById("to-radial")?.addEventListener("click", () => setView("radial"));
+        document.getElementById("to-bubble")?.addEventListener("click", () => setView("bubble"));
+        document.getElementById("send")?.addEventListener("click", sendCommand);
+        document.getElementById("voice")?.addEventListener("click", startVoiceCommand);
+        document.getElementById("create-auto")?.addEventListener("click", createQuickAutomation);
+        document.getElementById("command")?.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") sendCommand();
+        });
+        document.getElementById("open-dashboard")?.addEventListener("click", () => window.nexa.dashboard());
+        document.getElementById("large-mode")?.addEventListener("click", () => {
+          state.large = !state.large;
+          document.body.classList.toggle("large", state.large);
+          render();
+        });
+        document.getElementById("contrast-mode")?.addEventListener("click", () => {
+          state.contrast = !state.contrast;
+          document.body.classList.toggle("contrast", state.contrast);
+          render();
+        });
+        document.getElementById("automate-chrome")?.addEventListener("click", () => {
+          state.view = "chat";
+          state.panel = "chat";
+          render();
+          resize("chat");
+        });
+        document.getElementById("alert-enabled")?.addEventListener("click", () => updateBatterySettings({ enabled: !state.batterySettings.enabled }));
+        document.getElementById("threshold")?.addEventListener("change", (event) => updateBatterySettings({ threshold_percent: Number(event.target.value) }));
+        document.getElementById("repeat")?.addEventListener("change", (event) => updateBatterySettings({ repeat_interval_seconds: Number(event.target.value) }));
+        document.querySelectorAll("[data-folder]").forEach((button) => button.addEventListener("click", () => window.nexa.openFolder(button.dataset.folder)));
+        document.querySelectorAll("[data-auto]").forEach((button) => button.addEventListener("click", () => toggleAutomation(Number(button.dataset.auto), button.dataset.enabled === "true")));
+        document.querySelectorAll("[data-task]").forEach((button) => button.addEventListener("click", () => taskAction(Number(button.dataset.task), button.dataset.action)));
+        document.querySelectorAll("[data-suggestion]").forEach((button) => button.addEventListener("click", () => {
+          const input = document.getElementById("command");
+          if (input) input.value = button.dataset.suggestion;
+        }));
+        document.body.oncontextmenu = (event) => {
+          event.preventDefault();
+          window.nexa.contextMenu();
+        };
+      }
+
+      function render() {
+        if (state.view === "bubble") renderBubble();
+        else if (state.view === "radial") renderRadial();
+        else renderPanel();
+      }
+
+      setInterval(() => {
+        if (state.view !== "bubble") refresh();
+      }, 5000);
+
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") setView("bubble");
+        if (event.key === "Enter" && state.view === "bubble") setView("radial");
+      });
+
       render();
+      resize("bubble");
     </script>
   </body>
 </html>
