@@ -84,7 +84,20 @@ class AutomationEngine:
     def _execute_action(self, name: str, action: dict) -> dict:
         if action.get("type") == "notify":
             message = action.get("message", f"Automation fired: {name}")
-            return self.notifications.notify(name, message)
+            return self.notifications.notify(
+                "Nexa Automation",
+                message,
+                alert_type="automation",
+                module="automation_engine",
+                severity="low",
+                priority="medium",
+                category="automation",
+                suggested_action="View the automation log or dismiss this alert.",
+                action_buttons=["View Log", "Dismiss"],
+                voice_message="Automation completed successfully.",
+                voice_enabled=bool(action.get("voice_enabled", False)),
+                metadata={"automation": name, "action": action},
+            )
         if action.get("type") == "schedule_delay":
             return SchedulerAgent().schedule_delay(action["command"], int(action.get("delay_seconds", 300)))
         if action.get("type") == "move_by_extension":

@@ -113,7 +113,18 @@ class WebsiteProfileService:
                 self._history(profile.id, "login_retry", {"attempt": attempt, "error": last_error})
                 if attempt < max_retries:
                     time.sleep(delay * (multiplier ** (attempt - 1)))
-        self.notifications.notify("Website unavailable", f"{profile.name} unavailable. Tried {max_retries} times. Would you like me to continue monitoring?")
+        self.notifications.notify(
+            "Nexa Website Monitor",
+            f"{profile.name} is unavailable after {max_retries} attempts.",
+            alert_type="website_monitor",
+            module="website_profiles",
+            severity="medium",
+            priority="medium",
+            category="warning",
+            suggested_action="Continue monitoring or review the website profile.",
+            action_buttons=["Continue Monitoring", "Open Website Profile", "Dismiss"],
+            metadata={"profile_id": profile.id, "attempts": max_retries, "error": last_error},
+        )
         self._history(profile.id, "login_failed", {"attempts": max_retries, "error": last_error})
         return {"status": "failed", "attempts": max_retries, "error": last_error, "monitoring_prompt": True}
 
@@ -121,7 +132,18 @@ class WebsiteProfileService:
         profile = self.db.query(WebsiteProfile).filter(WebsiteProfile.name.ilike(name)).one_or_none()
         if not profile:
             message = f"Website profile for {name} does not exist. Please provide the website URL to analyze and save it."
-            self.notifications.notify("Nexa Website Profile Required", message)
+            self.notifications.notify(
+                "Nexa Website Profile Required",
+                message,
+                alert_type="website_profile",
+                module="website_profiles",
+                severity="medium",
+                priority="medium",
+                category="info",
+                suggested_action="Create a website profile before Nexa automates this site.",
+                action_buttons=["Create Profile", "Dismiss"],
+                metadata={"name": name},
+            )
             self._history(None, "profile_missing", {"name": name})
             return {"requires_profile": True, "name": name, "message": message}
         return self.auto_login(profile.id)
@@ -150,7 +172,20 @@ class WebsiteProfileService:
             result = self._check_available(profile)
             results.append(result)
             if result["available"]:
-                self.notifications.notify("Website available", f"{profile.name} is available now.")
+                self.notifications.notify(
+                    "Nexa Website Monitor",
+                    f"{profile.name} is now available.",
+                    alert_type="website_monitor",
+                    module="website_monitor",
+                    severity="medium",
+                    priority="medium",
+                    category="success",
+                    suggested_action="Open the monitored website.",
+                    action_buttons=["Open Website", "Dismiss"],
+                    voice_message="The monitored website is now available.",
+                    voice_enabled=True,
+                    metadata={"profile_id": profile.id, "name": profile.name, "url": profile.url},
+                )
                 profile.monitoring_enabled = False
                 row = self.db.query(WebsiteMonitoring).filter(WebsiteMonitoring.profile_id == profile.id).one_or_none()
                 if row:

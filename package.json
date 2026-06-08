@@ -4,14 +4,18 @@
   "private": true,
   "scripts": {
     "install:all": "npm --prefix frontend install && npm --prefix desktop install",
+    "install:backend": ".\\.venv\\Scripts\\python.exe -m pip install -r requirements.txt",
     "dev": "npm --prefix frontend run dev",
     "dev:frontend": "npm --prefix frontend run dev",
     "dev:desktop": "npm --prefix desktop run dev",
     "electron": "npm --prefix desktop run electron",
     "electron:dev": "npm --prefix desktop run electron:dev",
     "electron:build": "npm --prefix desktop run electron:build",
+    "build": "npm run build:frontend && npm run electron:build",
     "build:frontend": "npm --prefix frontend run build",
     "test:backend": "python -m pytest tests/backend",
+    "test": ".\\.venv\\Scripts\\python.exe -m pytest",
+    "test:coverage": ".\\.venv\\Scripts\\python.exe -m pytest --cov=backend --cov-report=term-missing",
     "backend": "python -m backend.run"
   }
 }

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, screen, shell } = require("electron");
+const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, screen, shell, Notification, desktopCapturer, globalShortcut } = require("electron");
 const { spawn } = require("child_process");
 const fs = require("fs");
 const os = require("os");
@@ -9,6 +9,11 @@ let tray;
 let backendProcess;
 let saveBoundsTimer;
 let dockBounds;
+let alertPollTimer;
+const shownAlertIds = new Set();
+let recentAlerts = [];
+let voiceStatus = { microphone_status: "offline", mode: "offline", muted: false };
+let resourceStatus = { mode: "normal" };
 const apiBase = process.env.NEXA_API_BASE || "http://127.0.0.1:8010/api";
 const backendUrl = new URL(apiBase);
 
@@ -110,12 +115,31 @@ function createTray() {
   );
   tray = new Tray(icon);
   tray.setToolTip("Nexa");
+  refreshTrayMenu();
+}
+
+function refreshTrayMenu(unreadCount = 0) {
   const loginSettings = app.getLoginItemSettings();
+  if (tray) {
+    tray.setToolTip(unreadCount > 0 ? `Nexa - ${unreadCount} unread alerts` : "Nexa");
+  }
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: "Nexa", enabled: false },
+      { label: unreadCount > 0 ? `${unreadCount} unread alerts` : "No unread alerts", enabled: false },
+      { label: `Voice: ${voiceStatus.microphone_status || "offline"} (${voiceStatus.mode || "offline"})`, enabled: false },
+      { label: `Resource mode: ${resourceStatus.mode || "normal"}`, enabled: false },
+      ...recentAlerts.slice(0, 5).map((alert) => ({
+        label: `${alert.title} - ${alert.module}`,
+        click: () => shell.openExternal("http://127.0.0.1:5173/")
+      })),
+      { type: "separator" },
       { label: "Show", click: () => overlay?.show() },
       { label: "Hide", click: () => overlay?.hide() },
+      { label: "Pause Listening", enabled: !voiceStatus.muted, click: () => setListening(true) },
+      { label: "Resume Listening", enabled: !!voiceStatus.muted, click: () => setListening(false) },
+      { label: "Show Tasks", click: () => shell.openExternal("http://127.0.0.1:5173/") },
+      { label: "Show Notifications", click: () => shell.openExternal("http://127.0.0.1:5173/") },
       {
         label: "Start Nexa on login",
         type: "checkbox",
@@ -126,6 +150,128 @@ function createTray() {
       { label: "Quit", click: () => app.quit() }
     ])
   );
+}
+
+async function pollAlerts() {
+  try {
+    const response = await fetch(`${apiBase}/notifications?unread_only=true&limit=10`);
+    if (!response.ok) return;
+    const alerts = await response.json();
+    try {
+      const voiceResponse = await fetch(`${apiBase}/voice/status`);
+      if (voiceResponse.ok) voiceStatus = await voiceResponse.json();
+      const resourceResponse = await fetch(`${apiBase}/resource-manager/status`);
+      if (resourceResponse.ok) resourceStatus = await resourceResponse.json();
+    } catch {
+      // Voice status is best-effort for the tray.
+    }
+    recentAlerts = alerts;
+    refreshTrayMenu(alerts.length);
+    for (const alert of alerts) {
+      if (shownAlertIds.has(alert.id)) continue;
+      shownAlertIds.add(alert.id);
+      showElectronAlert(alert);
+    }
+  } catch {
+    // Backend may still be starting.
+  }
+}
+
+async function setListening(paused) {
+  try {
+    const response = await fetch(`${apiBase}/voice/${paused ? "pause" : "resume"}`, { method: "POST" });
+    if (response.ok) voiceStatus = await response.json();
+    refreshTrayMenu(recentAlerts.length);
+  } catch {
+    // The next poll will retry when the backend is available.
+  }
+}
+
+function showElectronAlert(alert) {
+  if (!Notification.isSupported()) return;
+  const notification = new Notification({
+    title: alert.title,
+    body: `${alert.message}\n\nAction: ${alert.suggested_action}\nModule: ${alert.module}`,
+    silent: true,
+    urgency: alert.severity === "critical" ? "critical" : "normal",
+    actions: (alert.action_buttons || []).slice(0, 2).map((text) => ({ type: "button", text }))
+  });
+  notification.on("click", () => shell.openExternal("http://127.0.0.1:5173/"));
+  notification.on("action", async (_event, index) => {
+    const action = (alert.action_buttons || [])[index] || "Opened";
+    try {
+      await fetch(`${apiBase}/notifications/${alert.id}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, payload: { source: "electron_notification" } })
+      });
+    } catch {
+      // Action persistence is best-effort from the shell.
+    }
+  });
+  notification.show();
+}
+
+function startAlertPolling() {
+  clearInterval(alertPollTimer);
+  pollAlerts();
+  alertPollTimer = setInterval(pollAlerts, 30000);
+}
+
+async function captureScreenshotAssistant() {
+  try {
+    const display = screen.getPrimaryDisplay();
+    const sources = await desktopCapturer.getSources({
+      types: ["screen"],
+      thumbnailSize: { width: display.size.width, height: display.size.height }
+    });
+    const source = sources[0];
+    if (!source) return;
+    const folder = path.join(app.getPath("userData"), "screenshots");
+    fs.mkdirSync(folder, { recursive: true });
+    const filePath = path.join(folder, `nexa-screenshot-${new Date().toISOString().replace(/[:.]/g, "-")}.png`);
+    fs.writeFileSync(filePath, source.thumbnail.toPNG());
+    const response = await fetch(`${apiBase}/evolution/screenshots`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_path: filePath, source: "ctrl_shift_a", capture_mode: "full_screen", language: "eng" })
+    });
+    if (response.ok && Notification.isSupported()) {
+      const result = await response.json();
+      new Notification({
+        title: "Nexa Screenshot Assistant",
+        body: `${result.analysis || "Screenshot analyzed."}\n\nModule: screenshot_assistant`,
+        silent: true
+      }).show();
+    }
+  } catch (error) {
+    try {
+      await fetch(`${apiBase}/notifications`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Nexa Screenshot Assistant",
+          message: `Screenshot capture failed: ${error.message || error}`,
+          alert_type: "screenshot",
+          module: "screenshot_assistant",
+          severity: "medium",
+          priority: "medium",
+          category: "warning",
+          suggested_action: "Check Electron permissions and try Ctrl+Shift+A again.",
+          action_buttons: ["Dismiss"]
+        })
+      });
+    } catch {
+      // Backend may be unavailable during shutdown/startup.
+    }
+  }
+}
+
+function registerGlobalShortcuts() {
+  globalShortcut.unregister("Control+Shift+A");
+  globalShortcut.register("Control+Shift+A", () => {
+    void captureScreenshotAssistant();
+  });
 }
 
 ipcMain.handle("agent:command", async (_event, command) => {
@@ -232,6 +378,8 @@ app.whenReady().then(async () => {
   app.setName("Nexa");
   await ensureBackend();
   createOverlay();
+  registerGlobalShortcuts();
+  startAlertPolling();
 });
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
@@ -240,4 +388,6 @@ app.on("before-quit", () => {
   if (backendProcess && !backendProcess.killed) {
     backendProcess.kill();
   }
+  clearInterval(alertPollTimer);
+  globalShortcut.unregisterAll();
 });

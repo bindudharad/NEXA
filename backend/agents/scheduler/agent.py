@@ -42,6 +42,11 @@ class SchedulerAgent:
     def schedule_daily(self, command: str, hour: int, minute: int = 0) -> dict:
         return self._schedule_cron(command, CronTrigger(hour=hour, minute=minute), "daily")
 
+    def schedule_callable(self, job_id: str, func, hour: int, minute: int = 0, replace_existing: bool = True) -> dict:
+        self.scheduler.add_job(func, CronTrigger(hour=hour, minute=minute), id=job_id, replace_existing=replace_existing)
+        job = self.scheduler.get_job(job_id)
+        return {"job_id": job_id, "next_run_time": str(job.next_run_time) if job else None}
+
     def schedule_weekly(self, command: str, day_of_week: str, hour: int, minute: int = 0) -> dict:
         return self._schedule_cron(command, CronTrigger(day_of_week=day_of_week, hour=hour, minute=minute), "weekly")
 

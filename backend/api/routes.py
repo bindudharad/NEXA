@@ -2,7 +2,7 @@ import json
 
 import asyncio
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from backend.agents.browser import BrowserAgent
@@ -14,13 +14,87 @@ from backend.agents.scheduler import SchedulerAgent
 from backend.agents.system import SystemAgent
 from backend.ai.task_approval import TaskApprovalService
 from backend.api.dependencies import require_api_key
-from backend.api.schemas import ApprovalEditRequest, ApprovalRejectRequest, AutomationRequest, AutomationToggleRequest, BatteryAlertSettingsRequest, BatterySimulationRequest, BrowserDownloadRequest, BrowserFormRequest, CommandRequest, EventRequest, FileOperationRequest, GpuMonitorSettingsRequest, GpuSimulationRequest, KcetResultRequest, MemoryRequest, NotificationRequest, WebsiteActionRequest, WebsiteAnalyzeRequest, WebsiteCredentialRequest, WebsiteImportRequest, WebsiteMonitoringRequest, WebsiteOpenRequest, WebsiteProfileRequest
+from backend.api.schemas import (
+    AlertSettingsRequest,
+    ApprovalEditRequest,
+    ApprovalRejectRequest,
+    AutomationBuilderRequest,
+    AutomationRequest,
+    AutomationToggleRequest,
+    BatteryAlertSettingsRequest,
+    BatterySimulationRequest,
+    BrowserDownloadRequest,
+    BrowserFormRequest,
+    CollegeCheckRequest,
+    CommandRequest,
+    CopilotSuggestionStatusRequest,
+    DailyBriefingRequest,
+    DailyBriefingSettingsRequest,
+    DownloadsOrganizeRequest,
+    DownloadRuleRequest,
+    DownloadsScanRequest,
+    DownloadsSearchRequest,
+    EventRequest,
+    FileOperationRequest,
+    FocusControlRequest,
+    FocusDistractionRequest,
+    FocusEndRequest,
+    FocusGoalProgressRequest,
+    FocusGoalRequest,
+    FocusStartRequest,
+    GoalProgressRequest,
+    GoalRequest,
+    GpuMonitorSettingsRequest,
+    GpuSimulationRequest,
+    KcetResultRequest,
+    MemoryRequest,
+    NotificationActionRequest,
+    NotificationRequest,
+    PowerMonitorSettingsRequest,
+    PowerSimulationRequest,
+    ProjectGuardianProtectRequest,
+    ProjectGuardianSnapshotRequest,
+    ProjectGuardianRestoreRequest,
+    ResourceManagerSettingsRequest,
+    ScreenshotActionRequest,
+    ScreenshotRecordRequest,
+    ScreenshotSearchRequest,
+    ScreenshotSettingsRequest,
+    StudyChapterProgressRequest,
+    StudyChapterRequest,
+    StudyGoalRequest,
+    StudyGoalUpdateRequest,
+    StudyPlanRequest,
+    StudyProgressRequest,
+    StudySessionRequest,
+    StudySubjectRequest,
+    SystemAlertSettingsRequest,
+    TimelineEventRequest,
+    TimelineSearchRequest,
+    VoiceCommandRequest,
+    VoiceSettingsRequest,
+    VoiceWakeRequest,
+    WebsiteActionRequest,
+    WebsiteAnalyzeRequest,
+    WebsiteCredentialRequest,
+    WebsiteImportRequest,
+    WebsiteMonitoringRequest,
+    WebsiteOpenRequest,
+    WebsiteProfileRequest,
+)
 from backend.automation import AutomationEngine
 from backend.core.task_manager import TaskManager
 from backend.database.models import Automation, Notification, Task, TaskStatus
 from backend.database.session import get_db
 from backend.services.battery_alert import battery_alert_service
 from backend.services.gpu_monitor import gpu_monitor_service
+from backend.services.alert_framework import AlertService
+from backend.services.download_monitor import download_monitoring_service
+from backend.services.power_monitor import power_monitor_service
+from backend.services.resource_manager import resource_manager_service
+from backend.services.system_alerts import system_alert_service
+from backend.services.evolution import evolution_service
+from backend.services.voice_assistant import voice_assistant_service
 from backend.services.website_profiles import WebsiteProfileService
 
 router = APIRouter(dependencies=[Depends(require_api_key)])
@@ -59,10 +133,16 @@ def dashboard(db: Session = Depends(get_db)) -> dict:
     return {
         "system": system,
         "battery_alert": battery_alert_service.get_status(),
+        "power_monitor": power_monitor_service.get_status(),
+        "voice_assistant": voice_assistant_service.get_status(),
+        "download_monitor": download_monitoring_service.get_status(),
+        "resource_manager": resource_manager_service.get_status(),
+        "daily_briefing": evolution_service.latest_briefing(db),
+        "briefing_recommendations": evolution_service.briefing_recommendations(db, status="open", limit=5),
         "gpu_monitor": gpu_status,
         "tasks": [serialize_task(task) for task in tasks],
         "automations": AutomationEngine(db).list(),
-        "notifications": [{"id": item.id, "title": item.title, "message": item.message, "read": item.read} for item in notifications],
+        "notifications": [AlertService(db).serialize(item) for item in notifications],
         "scheduled_jobs": scheduler.jobs(),
     }
 
@@ -207,6 +287,52 @@ def clear_battery_alert_simulation() -> dict:
     return battery_alert_service.clear_simulation()
 
 
+@router.get("/power-monitor/settings")
+def power_monitor_settings(db: Session = Depends(get_db)) -> dict:
+    return power_monitor_service.get_settings(db).__dict__
+
+
+@router.put("/power-monitor/settings")
+def update_power_monitor_settings(request: PowerMonitorSettingsRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return power_monitor_service.update_settings(request.model_dump(exclude_unset=True), db)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/power-monitor/status")
+def power_monitor_status() -> dict:
+    return power_monitor_service.get_status()
+
+
+@router.get("/power-monitor/history")
+def power_monitor_history(q: str | None = Query(default=None), event_type: str | None = Query(default=None), limit: int = Query(default=100, ge=1, le=1000)) -> dict:
+    return power_monitor_service.history(limit=limit, query=q, event_type=event_type)
+
+
+@router.get("/power-monitor/export")
+def power_monitor_export() -> dict:
+    return power_monitor_service.export()
+
+
+@router.get("/power-monitor/recommendations")
+def power_monitor_recommendations() -> list[dict]:
+    return power_monitor_service.recommendations()
+
+
+@router.post("/power-monitor/test/simulate")
+def simulate_power_monitor(request: PowerSimulationRequest) -> dict:
+    try:
+        return power_monitor_service.simulate(request.battery_percent, request.is_charging)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/power-monitor/test/clear")
+def clear_power_monitor_simulation() -> dict:
+    return power_monitor_service.clear_simulation()
+
+
 @router.get("/gpu-monitor/settings")
 def gpu_monitor_settings(db: Session = Depends(get_db)) -> dict:
     return gpu_monitor_service.get_settings(db).__dict__
@@ -233,6 +359,41 @@ def simulate_gpu_monitor(request: GpuSimulationRequest) -> dict:
 @router.post("/gpu-monitor/test/clear")
 def clear_gpu_monitor_simulation() -> dict:
     return gpu_monitor_service.clear_simulation()
+
+
+@router.get("/system-alerts/settings")
+def system_alert_settings(db: Session = Depends(get_db)) -> dict:
+    return system_alert_service.get_settings(db).__dict__
+
+
+@router.put("/system-alerts/settings")
+def update_system_alert_settings(request: SystemAlertSettingsRequest, db: Session = Depends(get_db)) -> dict:
+    return system_alert_service.update_settings(request.model_dump(exclude_unset=True), db)
+
+
+@router.post("/system-alerts/evaluate")
+def evaluate_system_alerts() -> list[dict]:
+    return system_alert_service.evaluate_once()
+
+
+@router.get("/resource-manager/status")
+def resource_manager_status() -> dict:
+    return resource_manager_service.get_status()
+
+
+@router.get("/resource-manager/settings")
+def resource_manager_settings(db: Session = Depends(get_db)) -> dict:
+    return resource_manager_service.get_settings(db).__dict__
+
+
+@router.put("/resource-manager/settings")
+def update_resource_manager_settings(request: ResourceManagerSettingsRequest, db: Session = Depends(get_db)) -> dict:
+    return resource_manager_service.update_settings(request.model_dump(exclude_unset=True), db)
+
+
+@router.post("/resource-manager/evaluate")
+def evaluate_resource_manager() -> dict:
+    return resource_manager_service.evaluate_once()
 
 
 @router.get("/coding/report")
@@ -303,7 +464,629 @@ def ingest_event(request: EventRequest, db: Session = Depends(get_db)) -> list[d
 
 @router.post("/notifications")
 def send_notification(request: NotificationRequest, db: Session = Depends(get_db)) -> dict:
-    return NotificationAgent(db).notify(request.title, request.message)
+    return NotificationAgent(db).notify(
+        request.title,
+        request.message,
+        alert_type=request.alert_type,
+        module=request.module,
+        severity=request.severity,
+        priority=request.priority,
+        category=request.category,
+        suggested_action=request.suggested_action,
+        action_buttons=request.action_buttons,
+    )
+
+
+@router.get("/notifications")
+def list_notifications(
+    q: str | None = Query(default=None),
+    alert_type: str | None = Query(default=None),
+    severity: str | None = Query(default=None),
+    unread_only: bool = False,
+    limit: int = Query(default=100, ge=1, le=1000),
+) -> list[dict]:
+    return AlertService().list(limit=limit, query=q, alert_type=alert_type, severity=severity, unread_only=unread_only)
+
+
+@router.get("/notifications/stats")
+def notification_stats() -> dict:
+    return AlertService().stats()
+
+
+@router.get("/notifications/export")
+def export_notifications() -> dict:
+    return AlertService().export()
+
+
+@router.put("/notifications/{notification_id}/read")
+def mark_notification_read(notification_id: int, read: bool = True) -> dict:
+    try:
+        return AlertService().mark_read(notification_id, read)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/notifications/{notification_id}/actions")
+def record_notification_action(notification_id: int, request: NotificationActionRequest) -> dict:
+    try:
+        return AlertService().record_action(notification_id, request.action, request.payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/notifications/{notification_id}")
+def delete_notification(notification_id: int) -> dict:
+    try:
+        return AlertService().delete(notification_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/alert-settings")
+def alert_settings(db: Session = Depends(get_db)) -> dict:
+    return AlertService(db).get_settings(db)
+
+
+@router.put("/alert-settings")
+def update_alert_settings(request: AlertSettingsRequest, db: Session = Depends(get_db)) -> dict:
+    return AlertService(db).update_settings(request.model_dump(exclude_unset=True), db)
+
+
+@router.get("/voice/settings")
+def voice_settings(db: Session = Depends(get_db)) -> dict:
+    return voice_assistant_service.get_settings(db).__dict__
+
+
+@router.put("/voice/settings")
+def update_voice_settings(request: VoiceSettingsRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return voice_assistant_service.update_settings(request.model_dump(exclude_unset=True), db)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/voice/status")
+def voice_status() -> dict:
+    return voice_assistant_service.get_status()
+
+
+@router.post("/voice/wake")
+def voice_wake(request: VoiceWakeRequest) -> dict:
+    return voice_assistant_service.wake(request.phrase, request.source)
+
+
+@router.post("/voice/command")
+def voice_command(request: VoiceCommandRequest) -> dict:
+    try:
+        return voice_assistant_service.process_command(request.command, request.source)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/voice/pause")
+def pause_voice() -> dict:
+    return voice_assistant_service.pause()
+
+
+@router.post("/voice/resume")
+def resume_voice() -> dict:
+    return voice_assistant_service.resume()
+
+
+@router.get("/voice/interactions")
+def voice_interactions(limit: int = Query(default=100, ge=1, le=1000)) -> list[dict]:
+    return voice_assistant_service.interactions(limit)
+
+
+@router.get("/evolution/overview")
+def evolution_overview(db: Session = Depends(get_db)) -> dict:
+    return evolution_service.overview(db)
+
+
+@router.post("/evolution/copilot/evaluate")
+def evaluate_copilot(db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.generate_copilot_suggestions(db)
+
+
+@router.get("/evolution/copilot/suggestions")
+def copilot_suggestions(limit: int = Query(default=50, ge=1, le=500), db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.list_copilot_suggestions(db, limit)
+
+
+@router.put("/evolution/copilot/suggestions/{suggestion_id}")
+def update_copilot_suggestion(suggestion_id: int, request: CopilotSuggestionStatusRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.update_suggestion_status(db, suggestion_id, request.status)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/evolution/daily-briefing")
+def generate_daily_briefing(request: DailyBriefingRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.generate_daily_briefing(db, speak=request.speak, notify=request.notify)
+
+
+@router.get("/evolution/daily-briefing/latest")
+def latest_daily_briefing(db: Session = Depends(get_db)) -> dict | None:
+    return evolution_service.latest_briefing(db)
+
+
+@router.get("/evolution/daily-briefing/history")
+def daily_briefing_history(limit: int = Query(default=30, ge=1, le=365), db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.briefing_history(db, limit)
+
+
+@router.get("/evolution/daily-briefing/recommendations")
+def daily_briefing_recommendations(status: str | None = Query(default=None), limit: int = Query(default=50, ge=1, le=500), db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.briefing_recommendations(db, status, limit)
+
+
+@router.get("/evolution/daily-briefing/analytics")
+def daily_briefing_analytics(limit: int = Query(default=30, ge=1, le=365), db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.briefing_analytics(db, limit)
+
+
+@router.get("/evolution/daily-briefing/settings")
+def daily_briefing_settings(db: Session = Depends(get_db)) -> dict:
+    return evolution_service.get_briefing_settings(db)
+
+
+@router.put("/evolution/daily-briefing/settings")
+def update_daily_briefing_settings(request: DailyBriefingSettingsRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.update_briefing_settings(db, request.model_dump(exclude_unset=True))
+
+
+@router.post("/evolution/focus/start")
+def start_focus(request: FocusStartRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.start_focus(
+        db,
+        request.title,
+        request.duration_minutes,
+        request.break_minutes,
+        request.mode,
+        request.session_type,
+        request.subject,
+        request.chapter,
+        request.topic,
+        request.current_goal,
+        request.pomodoro_preset,
+        request.blocked_websites,
+        request.blocked_apps,
+        request.mute_notifications,
+        request.allow_critical_notifications,
+        request.long_break_minutes,
+        request.cycles_before_long_break,
+    )
+
+
+@router.post("/evolution/focus/end")
+def end_focus(request: FocusEndRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.end_focus(db, request.session_id, request.tasks_completed, request.distraction_count, request.goal_completion_percent)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/evolution/focus/sessions")
+def focus_sessions(limit: int = Query(default=50, ge=1, le=500), db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.list_focus_sessions(db, limit)
+
+
+@router.get("/evolution/focus/status")
+def focus_status(db: Session = Depends(get_db)) -> dict:
+    return evolution_service.focus_status(db)
+
+
+@router.get("/evolution/focus/dashboard")
+def focus_dashboard(db: Session = Depends(get_db)) -> dict:
+    return evolution_service.focus_dashboard(db)
+
+
+@router.post("/evolution/focus/pause")
+def pause_focus(request: FocusControlRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.pause_focus(db, request.session_id, request.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/evolution/focus/resume")
+def resume_focus(request: FocusControlRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.resume_focus(db, request.session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/evolution/focus/extend")
+def extend_focus(request: FocusControlRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.extend_focus(db, request.minutes, request.session_id, request.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/evolution/focus/break")
+def start_focus_break(request: FocusControlRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.start_focus_break(db, request.minutes, request.session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/evolution/focus/distraction-check")
+def focus_distraction_check(request: FocusDistractionRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.check_focus_distraction(db, request.url, request.app_name)
+
+
+@router.post("/evolution/focus/goals")
+def create_focus_goal(request: FocusGoalRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.create_focus_goal(db, request.title, request.goal_type, request.target_minutes, request.session_id)
+
+
+@router.put("/evolution/focus/goals/{goal_id}")
+def update_focus_goal(goal_id: int, request: FocusGoalProgressRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.update_focus_goal(db, goal_id, request.completed_minutes, request.status)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/evolution/study/plans")
+def create_study_plan(request: StudyPlanRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.create_study_plan(
+        db,
+        request.title,
+        request.exam_date,
+        request.topics,
+        request.subject_name,
+        request.priority,
+        request.difficulty,
+        request.target_score,
+        request.availability_minutes_per_day,
+    )
+
+
+@router.get("/evolution/study/plans")
+def list_study_plans(db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.list_study_plans(db)
+
+
+@router.get("/evolution/study/dashboard")
+def study_dashboard(db: Session = Depends(get_db)) -> dict:
+    return evolution_service.study_dashboard(db)
+
+
+@router.get("/evolution/study/recommendations")
+def study_recommendations(db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.study_recommendations(db)
+
+
+@router.post("/evolution/study/subjects")
+def create_study_subject(request: StudySubjectRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.create_study_subject(db, request.name, request.priority, request.difficulty, request.exam_date, request.target_score)
+
+
+@router.post("/evolution/study/chapters")
+def create_study_chapter(request: StudyChapterRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.add_study_chapter(db, request.subject_id, request.title, request.unit, request.topics, request.priority, request.difficulty)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.put("/evolution/study/chapters/{chapter_id}/progress")
+def update_study_chapter_progress(chapter_id: int, request: StudyChapterProgressRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.update_study_chapter_progress(db, chapter_id, request.completion_percent, request.status, request.notes)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.put("/evolution/study/plans/{plan_id}/progress")
+def update_study_progress(plan_id: int, request: StudyProgressRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.update_study_progress(db, plan_id, request.topic, request.progress_percent, request.status, request.notes)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/evolution/study/plans/{plan_id}/reminder")
+def schedule_study_reminder(plan_id: int, topic: str | None = None, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.schedule_study_reminder(db, plan_id, topic)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/evolution/study/sessions")
+def record_study_session(request: StudySessionRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.record_study_session(
+        db,
+        request.subject_id,
+        request.subject_name,
+        request.chapter_id,
+        request.chapter_title,
+        request.topic,
+        request.duration_minutes,
+        request.session_type,
+        request.notes,
+    )
+
+
+@router.post("/evolution/study/goals")
+def create_study_goal(request: StudyGoalRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.create_study_goal(db, request.title, request.target_value, request.unit, request.subject_id, request.deadline)
+
+
+@router.put("/evolution/study/goals/{goal_id}")
+def update_study_goal(goal_id: int, request: StudyGoalUpdateRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.update_study_goal(db, goal_id, request.current_value)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/evolution/timeline")
+def add_timeline_event(request: TimelineEventRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.add_timeline_event(db, request.event_type, request.title, request.description, request.source, request.duration_seconds, request.metadata)
+
+
+@router.get("/evolution/timeline")
+def search_timeline(
+    q: str | None = Query(default=None),
+    event_type: str | None = Query(default=None),
+    start_date: str | None = Query(default=None),
+    end_date: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1000),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    return evolution_service.search_timeline(db, q, event_type, limit, start_date, end_date)
+
+
+@router.get("/evolution/timeline/dashboard")
+def timeline_dashboard(
+    view: str = Query(default="today"),
+    event_type: str | None = Query(default=None),
+    q: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict:
+    return evolution_service.timeline_dashboard(db, view, event_type, q)
+
+
+@router.get("/evolution/timeline/summary")
+def timeline_summary(period: str = Query(default="day"), reference_date: str | None = Query(default=None), db: Session = Depends(get_db)) -> dict:
+    return evolution_service.timeline_summary(db, period, reference_date)
+
+
+@router.post("/evolution/timeline/search")
+def natural_timeline_search(request: TimelineSearchRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.natural_memory_search(db, request.query, request.limit)
+
+
+@router.post("/evolution/project-guardian/snapshot")
+def project_guardian_snapshot(request: ProjectGuardianSnapshotRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.project_guardian_snapshot(db, request.project_path, request.action)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/evolution/project-guardian/dashboard")
+def project_guardian_dashboard(project_path: str | None = Query(default=None), db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.project_guardian_dashboard(db, project_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/evolution/project-guardian/git-status")
+def project_guardian_git_status(project_path: str = Query(min_length=1)) -> dict:
+    try:
+        return evolution_service.git_status(project_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/evolution/project-guardian/protect")
+def project_guardian_protect(request: ProjectGuardianProtectRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.protect_project_operation(db, request.project_path, request.operation, request.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/evolution/project-guardian/projects/{project_id}/health")
+def project_guardian_health(project_id: int, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.evaluate_project_health(db, project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/evolution/project-guardian/restore")
+def project_guardian_restore(request: ProjectGuardianRestoreRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.restore_project_backup(db, request.backup_id, request.restore_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/evolution/downloads/scan")
+def scan_downloads(request: DownloadsScanRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.scan_downloads(db, request.folder, request.large_file_mb)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/evolution/downloads/organize")
+def organize_downloads(request: DownloadsOrganizeRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.organize_downloads(db, request.folder, request.dry_run)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/evolution/downloads/dashboard")
+def download_manager_dashboard(folder: str | None = None, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.download_dashboard(db, folder)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/evolution/downloads/monitor/status")
+def download_monitor_status() -> dict:
+    return download_monitoring_service.get_status()
+
+
+@router.post("/evolution/downloads/search")
+def search_downloads(request: DownloadsSearchRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.search_downloads(db, request.query, request.limit)
+
+
+@router.get("/evolution/downloads/analytics")
+def download_analytics(days: int = Query(default=30, ge=1, le=365), db: Session = Depends(get_db)) -> dict:
+    return evolution_service.download_analytics(db, days)
+
+
+@router.get("/evolution/downloads/duplicates")
+def duplicate_downloads(limit: int = Query(default=100, ge=1, le=1000), db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.list_duplicate_files(db, limit)
+
+
+@router.get("/evolution/downloads/large-files")
+def large_downloads(limit: int = Query(default=100, ge=1, le=1000), db: Session = Depends(get_db)) -> list[dict]:
+    downloads = evolution_service.list_downloads(db, limit=1000)
+    return [item for item in downloads if item["size_bytes"] >= 100 * 1024 * 1024][:limit]
+
+
+@router.get("/evolution/downloads/rules")
+def list_download_rules(db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.list_download_rules(db)
+
+
+@router.post("/evolution/downloads/rules")
+def create_download_rule(request: DownloadRuleRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.create_download_rule(db, request.name, request.pattern, request.category, request.destination, request.match_type, request.enabled, request.priority)
+
+
+@router.get("/evolution/downloads/cleanup-suggestions")
+def download_cleanup_suggestions(limit: int = Query(default=100, ge=1, le=1000), db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.cleanup_suggestions(db, limit)
+
+
+@router.get("/evolution/downloads")
+def list_downloads(limit: int = Query(default=100, ge=1, le=1000), db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.list_downloads(db, limit)
+
+
+@router.post("/evolution/screenshots")
+def record_screenshot(request: ScreenshotRecordRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.record_screenshot(db, request.file_path, request.source, request.extracted_text, request.analysis, request.capture_mode, request.language)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/evolution/screenshots/dashboard")
+def screenshot_dashboard(db: Session = Depends(get_db)) -> dict:
+    return evolution_service.screenshot_dashboard(db)
+
+
+@router.post("/evolution/screenshots/search")
+def search_screenshots(request: ScreenshotSearchRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.search_screenshots(db, request.query, request.limit)
+
+
+@router.post("/evolution/screenshots/{screenshot_id}/actions")
+def screenshot_action(screenshot_id: int, request: ScreenshotActionRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.record_screenshot_action(db, screenshot_id, request.action_type, request.payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/evolution/screenshots/settings")
+def screenshot_settings(db: Session = Depends(get_db)) -> dict:
+    return evolution_service.get_screenshot_settings(db)
+
+
+@router.put("/evolution/screenshots/settings")
+def update_screenshot_settings(request: ScreenshotSettingsRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.update_screenshot_settings(db, request.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/evolution/screenshots")
+def list_screenshots(limit: int = Query(default=50, ge=1, le=500), db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.list_screenshots(db, limit)
+
+
+@router.post("/evolution/automation-builder")
+def build_automation(request: AutomationBuilderRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.build_automation(db, request.prompt)
+
+
+@router.post("/evolution/goals")
+def create_goal(request: GoalRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.create_goal(db, request.title, request.target_value, request.unit, request.goal_type, request.period)
+
+
+@router.get("/evolution/goals")
+def list_goals(db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.list_goals(db)
+
+
+@router.get("/evolution/goals/stats")
+def goal_stats(db: Session = Depends(get_db)) -> dict:
+    return evolution_service.goal_stats(db)
+
+
+@router.put("/evolution/goals/{goal_id}")
+def update_goal(goal_id: int, request: GoalProgressRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.update_goal(db, goal_id, request.current_value)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/evolution/achievements")
+def list_achievements(db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.list_achievements(db)
+
+
+@router.post("/evolution/achievements/evaluate")
+def evaluate_achievements(db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.evaluate_achievements(db)
+
+
+@router.post("/evolution/college/check")
+def check_college_updates(request: CollegeCheckRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.check_college_updates(db, request.source)
+
+
+@router.get("/evolution/college/updates")
+def list_college_updates(limit: int = Query(default=50, ge=1, le=500), db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.list_college_updates(db, limit)
+
+
+@router.get("/evolution/self-health")
+def self_health(db: Session = Depends(get_db)) -> dict:
+    return evolution_service.self_health(db)
+
+
+@router.get("/mobile/summary")
+def mobile_summary(db: Session = Depends(get_db)) -> dict:
+    return evolution_service.mobile_summary(db)
+
+
+@router.get("/mobile/docs")
+def mobile_docs() -> dict:
+    return evolution_service.mobile_api_docs()
 
 
 @router.post("/files/create")

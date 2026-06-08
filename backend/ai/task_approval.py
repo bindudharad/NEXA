@@ -18,7 +18,6 @@ from backend.database.models import (
     ApprovalStatus,
     CorrectionHistory,
     Memory,
-    Notification,
     Task,
     TaskApproval,
 )
@@ -134,7 +133,18 @@ class TaskApprovalService:
         approval.updated_at = datetime.utcnow()
         self.db.commit()
         self.db.refresh(approval)
-        NotificationAgent(self.db).notify("Nexa Task Approved", f"Created task: {approval.corrected_text}")
+        NotificationAgent(self.db).notify(
+            "Nexa Task Approved",
+            f"Created task: {approval.corrected_text}",
+            alert_type="task_approval",
+            module="task_approval",
+            severity="low",
+            priority="low",
+            category="success",
+            suggested_action="Review the created task if needed.",
+            action_buttons=["Open Task", "Dismiss"],
+            metadata={"approval_id": approval.id, "task_id": task.id},
+        )
         self._record_history(approval.id, "approved", {"task_id": task.id})
         logger.info("Task approval approved id=%s task_id=%s", approval.id, task.id)
         return approval, task
@@ -400,8 +410,25 @@ class TaskApprovalService:
             "Actions: Approve, Edit, Reject."
             f"{warning}"
         )
-        self.db.add(Notification(title="Nexa Task Approval Required", message=message))
-        self.db.commit()
+        NotificationAgent(self.db).notify(
+            "Nexa Task Approval Required",
+            message,
+            alert_type="approval_required",
+            module="task_approval",
+            severity="high" if approval.high_risk else "medium",
+            priority="high" if approval.high_risk else "medium",
+            category="warning",
+            suggested_action="Approve, edit, or reject before Nexa executes anything.",
+            action_buttons=["Approve", "Edit", "Reject"],
+            metadata={
+                "approval_id": approval.id,
+                "original_text": approval.original_text,
+                "corrected_text": approval.corrected_text,
+                "confidence": approval.confidence,
+                "high_risk": approval.high_risk,
+                "status": approval.status,
+            },
+        )
 
     def _get(self, approval_id: int) -> TaskApproval:
         approval = self.db.get(TaskApproval, approval_id)

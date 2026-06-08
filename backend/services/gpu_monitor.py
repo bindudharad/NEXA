@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from backend.agents.notifications import NotificationAgent
 from backend.database.models import Setting
 from backend.database.session import SessionLocal
+from backend.services.resource_manager import resource_manager_service
 
 logger = logging.getLogger("nexa.gpu")
 
@@ -25,6 +26,7 @@ class GpuMonitorSettings:
     enabled: bool = True
     threshold_celsius: int = 50
     sound_enabled: bool = True
+    voice_enabled: bool = True
     notification_enabled: bool = True
     repeat_interval_seconds: int = 300
 
@@ -59,7 +61,7 @@ class GpuSample:
 class GpuMonitorService:
     settings_key = "gpu_monitor_settings"
 
-    def __init__(self, db_factory: Callable[[], Session] = SessionLocal, poll_interval_seconds: int = 30) -> None:
+    def __init__(self, db_factory: Callable[[], Session] = SessionLocal, poll_interval_seconds: int = 120) -> None:
         self.db_factory = db_factory
         self.poll_interval_seconds = poll_interval_seconds
         self.status = GpuMonitorStatus()
@@ -67,7 +69,7 @@ class GpuMonitorService:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
-        self.sound_path = Path("assets/sounds/low-battery-alert.wav").resolve()
+        self.sound_path = Path("assets/sounds/nexa-critical.wav").resolve()
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -172,7 +174,7 @@ class GpuMonitorService:
                 self.evaluate_once()
             except Exception:
                 logger.exception("GPU monitor evaluation failed")
-            self._stop.wait(self.poll_interval_seconds)
+            self._stop.wait(resource_manager_service.interval_for("gpu_monitor", self.poll_interval_seconds))
 
     def _read_gpu(self) -> GpuSample:
         if self._simulation is not None:
@@ -273,12 +275,32 @@ try {
         return GpuSample(gpu_name=data.get("Name"), usage_percent=self._float_or_none(data.get("Usage")), memory_total_mb=total_mb, source="windows")
 
     def _trigger_alert(self, settings: GpuMonitorSettings, sample: GpuSample) -> None:
-        message = f"GPU temperature has exceeded {settings.threshold_celsius}°C."
+        message = f"GPU Temperature is {sample.temperature_celsius}°C.\nThis exceeds your configured limit of {settings.threshold_celsius}°C."
         if settings.notification_enabled:
             with self.db_factory() as db:
-                NotificationAgent(db).notify("Nexa GPU Alert", message)
+                NotificationAgent(db).notify(
+                    "Nexa GPU Alert",
+                    message,
+                    alert_type="gpu",
+                    module="gpu_monitor",
+                    severity="high",
+                    priority="high",
+                    category="critical",
+                    suggested_action="View GPU details and reduce GPU load.",
+                    action_buttons=["View GPU Details", "Dismiss"],
+                    voice_message="GPU temperature is above the safe threshold.",
+                    sound_enabled=False,
+                    voice_enabled=False,
+                    metadata={
+                        "gpu_name": sample.gpu_name,
+                        "temperature_celsius": sample.temperature_celsius,
+                        "threshold_celsius": settings.threshold_celsius,
+                    },
+                )
         if settings.sound_enabled:
             self._play_sound()
+        if settings.voice_enabled:
+            self._speak()
         timestamp = datetime.utcnow().isoformat()
         with self._lock:
             self.status.alert_active = True
@@ -308,8 +330,28 @@ try {
 
             winsound.PlaySound(str(self.sound_path), winsound.SND_FILENAME | winsound.SND_ASYNC)
             threading.Timer(2.0, lambda: winsound.PlaySound(None, winsound.SND_PURGE)).start()
+            logging.getLogger("nexa.alerts").info("Sound Played module=gpu_monitor sound=%s reason=gpu_over_threshold", self.sound_path)
         except Exception:
             logger.exception("GPU alert sound playback failed")
+
+    def _speak(self) -> None:
+        text = "GPU temperature is above the safe threshold."
+        script = (
+            "Add-Type -AssemblyName System.Speech; "
+            "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+            "$s.Volume = 100; $s.Rate = 0; "
+            f"$s.Speak({json.dumps(text)});"
+        )
+        try:
+            subprocess.Popen(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                shell=False,
+            )
+            logging.getLogger("nexa.alerts").info("Voice Played module=gpu_monitor text=%s", text)
+        except Exception:
+            logger.exception("GPU alert voice playback failed")
 
     def _last_alert_datetime(self) -> datetime | None:
         with self._lock:

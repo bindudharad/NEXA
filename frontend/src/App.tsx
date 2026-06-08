@@ -1,5 +1,5 @@
 import React from "react";
-import { Activity, Bell, Bot, Brain, CalendarClock, Code2, Globe, LayoutDashboard, Menu, Settings, Workflow, X } from "lucide-react";
+import { Activity, BatteryCharging, Bell, BookOpen, Bot, Brain, CalendarClock, Camera, Code2, Download, Focus, Gauge, Globe, LayoutDashboard, Menu, Settings, Shield, Sparkles, Workflow, X } from "lucide-react";
 import { Dashboard } from "./pages/Dashboard";
 import { Chat } from "./pages/Chat";
 import { CodingAnalytics } from "./pages/CodingAnalytics";
@@ -7,11 +7,31 @@ import { Automations } from "./pages/Automations";
 import { Memory } from "./pages/Memory";
 import { SettingsPage } from "./pages/Settings";
 import { WebsiteVault } from "./pages/WebsiteVault";
+import { Alerts } from "./pages/Alerts";
+import { BatteryHealth } from "./pages/BatteryHealth";
+import { ResourceMonitor } from "./pages/ResourceMonitor";
+import { Evolution } from "./pages/Evolution";
+import { DailyBriefingPage } from "./pages/DailyBriefing";
+import { FocusModePage } from "./pages/FocusMode";
+import { StudyAssistant } from "./pages/StudyAssistant";
+import { ProjectGuardian } from "./pages/ProjectGuardian";
+import { DownloadManager } from "./pages/DownloadManager";
+import { ScreenshotAssistant } from "./pages/ScreenshotAssistant";
 
 const pages = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, component: Dashboard },
   { id: "chat", label: "Chat", icon: Bot, component: Chat },
   { id: "automation", label: "Automation", icon: Workflow, component: Automations },
+  { id: "alerts", label: "Alerts", icon: Bell, component: Alerts },
+  { id: "briefing", label: "Briefing", icon: CalendarClock, component: DailyBriefingPage },
+  { id: "focus", label: "Focus Mode", icon: Focus, component: FocusModePage },
+  { id: "study", label: "Study", icon: BookOpen, component: StudyAssistant },
+  { id: "guardian", label: "Guardian", icon: Shield, component: ProjectGuardian },
+  { id: "downloads", label: "Downloads", icon: Download, component: DownloadManager },
+  { id: "screenshots", label: "Screenshots", icon: Camera, component: ScreenshotAssistant },
+  { id: "battery", label: "Battery Health", icon: BatteryCharging, component: BatteryHealth },
+  { id: "resources", label: "Resources", icon: Gauge, component: ResourceMonitor },
+  { id: "evolution", label: "Evolution", icon: Sparkles, component: Evolution },
   { id: "websites", label: "Website Vault", icon: Globe, component: WebsiteVault },
   { id: "memory", label: "Memory", icon: Brain, component: Memory },
   { id: "coding", label: "Analytics", icon: Code2, component: CodingAnalytics },

@@ -94,6 +94,26 @@
         box-shadow: 0 26px 68px rgba(242, 184, 75, 0.48), inset 0 0 0 1px rgba(255, 255, 255, 0.24);
       }
 
+      .bubble.listening {
+        animation: voicePulse 1.2s ease-in-out infinite;
+        box-shadow: 0 0 0 8px rgba(34, 211, 238, 0.12), 0 24px 70px rgba(34, 211, 238, 0.32);
+      }
+
+      .center-orb.listening {
+        animation: centerVoicePulse 1.2s ease-in-out infinite;
+        box-shadow: 0 0 0 8px rgba(34, 211, 238, 0.12), 0 24px 70px rgba(34, 211, 238, 0.32);
+      }
+
+      @keyframes voicePulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.06); }
+      }
+
+      @keyframes centerVoicePulse {
+        0%, 100% { transform: translate(-50%, -50%) scale(1); }
+        50% { transform: translate(-50%, -50%) scale(1.06); }
+      }
+
       .bubble-status {
         position: absolute;
         right: 13px;
@@ -440,7 +460,12 @@
       const root = document.getElementById("root");
       const permanentModules = [
         { id: "chat", label: "Chat", icon: "💬", reason: "Always ready" },
-        { id: "tasks", label: "Tasks", icon: "📋", reason: "Always visible" }
+        { id: "tasks", label: "Tasks", icon: "📋", reason: "Always visible" },
+        { id: "battery", label: "Battery", icon: "🔋", reason: "Power health" },
+        { id: "focus", label: "Focus", icon: "FM", reason: "Productivity" },
+        { id: "study", label: "Study", icon: "ST", reason: "Exam coach" },
+        { id: "timeline", label: "Timeline", icon: "TL", reason: "Memory" },
+        { id: "guardian", label: "Guardian", icon: "PG", reason: "Recovery" }
       ];
       const state = {
         view: "bubble",
@@ -450,6 +475,13 @@
         coding: null,
         weekly: null,
         batterySettings: null,
+        powerSettings: null,
+        powerHistory: null,
+        focusStatus: null,
+        studyDashboard: null,
+        timelineDashboard: null,
+        guardianDashboard: null,
+        voiceStatus: null,
         chat: [{ who: "Nexa", text: "Nexa Active" }],
         loading: false,
         large: false,
@@ -493,6 +525,8 @@
         const system = dashboard.system || {};
         const context = system.context || {};
         const alert = dashboard.battery_alert || {};
+        const power = dashboard.power_monitor || {};
+        const focus = state.focusStatus || {};
         const automations = dashboard.automations || [];
         const activeTasks = (dashboard.tasks || []).filter((task) => ["created", "running", "pending_confirmation"].includes(task.status)).length;
         const activeAutomations = automations.filter((item) => item.enabled).length;
@@ -514,7 +548,7 @@
         if (context.downloads_active) {
           dynamic.push({ id: "files", label: "Downloads", icon: "⬇", reason: "Download active" });
         }
-        if (alert.alert_active || ((alert.battery_percent ?? system.battery_percent) <= 20 && !(alert.is_charging ?? system.battery_plugged))) {
+        if (alert.alert_active || ((power.battery_percent ?? alert.battery_percent ?? system.battery_percent) <= 20 && !(power.is_charging ?? alert.is_charging ?? system.battery_plugged))) {
           dynamic.push({ id: "battery", label: "Battery Low", icon: "🔋", reason: "Needs charge" });
         }
         if (context.system_attention) {
@@ -525,6 +559,9 @@
         }
         if (activeTasks > 0) {
           dynamic.push({ id: "tasks", label: "Active Tasks", icon: "TK", reason: `${activeTasks} active` });
+        }
+        if (focus.active) {
+          dynamic.push({ id: "focus", label: `${Math.floor((focus.remaining_seconds || 0) / 60)}m Focus`, icon: "FM", reason: `${Math.round(focus.session_progress_percent || 0)}% done` });
         }
         const merged = [...permanentModules, ...dynamic];
         return merged.filter((item, index, all) => all.findIndex((candidate) => candidate.id === item.id) === index);
@@ -547,18 +584,40 @@
       async function refresh() {
         try {
           state.dashboard = await window.nexa.api("/dashboard");
+          state.voiceStatus = await window.nexa.api("/voice/status");
+          state.focusStatus = await window.nexa.api("/evolution/focus/status");
           if (state.panel === "coding") {
             state.coding = await window.nexa.api("/coding/report");
             state.weekly = await window.nexa.api("/coding/weekly-report");
           }
           if (state.panel === "battery" || state.panel === "settings") {
             state.batterySettings = await window.nexa.api("/battery-alert/settings");
+            state.powerSettings = await window.nexa.api("/power-monitor/settings");
+            state.powerHistory = await window.nexa.api("/power-monitor/history?limit=5");
+          }
+          if (state.panel === "study") {
+            state.studyDashboard = await window.nexa.api("/evolution/study/dashboard");
+          }
+          if (state.panel === "timeline") {
+            state.timelineDashboard = await window.nexa.api("/evolution/timeline/dashboard?view=today");
+          }
+          if (state.panel === "guardian") {
+            state.guardianDashboard = await window.nexa.api("/evolution/project-guardian/dashboard?project_path=" + encodeURIComponent("C:\\Programs\\codex\\NEXA"));
           }
           state.error = "";
         } catch (error) {
           state.error = String(error.message || error);
         }
         render();
+      }
+
+      async function refreshVoiceStatus() {
+        try {
+          state.voiceStatus = await window.nexa.api("/voice/status");
+          if (state.view === "bubble" || state.view === "radial") render();
+        } catch {
+          // Voice status is optional while the backend is starting.
+        }
       }
 
       function speak(text) {
@@ -631,8 +690,26 @@
         render();
       }
 
+      async function updatePowerSettings(patch) {
+        state.powerSettings = await window.nexa.api("/power-monitor/settings", { method: "PUT", body: patch });
+        render();
+      }
+
       async function toggleAutomation(id, enabled) {
         await window.nexa.api(`/automations/${id}/toggle`, { method: "PUT", body: { enabled } });
+        await refresh();
+      }
+
+      async function startFocusQuick() {
+        await window.nexa.api("/evolution/focus/start", {
+          method: "POST",
+          body: { title: "Orbital Focus Session", session_type: "focus", duration_minutes: 25, current_goal: "Stay focused" }
+        });
+        await refresh();
+      }
+
+      async function focusAction(action, body = {}) {
+        await window.nexa.api(`/evolution/focus/${action}`, { method: "POST", body });
         await refresh();
       }
 
@@ -662,26 +739,34 @@
       function renderBattery() {
         const system = state.dashboard?.system || {};
         const alert = state.dashboard?.battery_alert || {};
+        const power = state.dashboard?.power_monitor || {};
         const settings = state.batterySettings || {};
-        const batteryPercent = alert.battery_percent ?? system.battery_percent;
-        return renderShell("Battery", "Power status and low battery automation", `
+        const powerSettings = state.powerSettings || {};
+        const events = state.powerHistory?.events || [];
+        const sessions = state.powerHistory?.charge_sessions || [];
+        const batteryPercent = power.battery_percent ?? alert.battery_percent ?? system.battery_percent;
+        return renderShell("Battery Health", "Power status, charging, history, and health", `
           ${alert.alert_active ? `<div class="warning"><strong>Low Battery Warning</strong><br>Only ${alert.battery_percent}% battery remaining. Please connect your charger.</div>` : ""}
           <div class="grid cols-3">
             ${card("Battery %", fmt(batteryPercent, "%"))}
-            ${card("Battery Health", batteryHealth(batteryPercent))}
-            ${card("Charging", alert.is_charging ?? system.battery_plugged ? "Yes" : "No")}
-            ${card("Time Remaining", secs(system.battery_secs_left))}
+            ${card("Battery Health", power.battery_health_percent == null ? batteryHealth(batteryPercent) : `${power.battery_health_percent}%`)}
+            ${card("Wear", power.battery_wear_percent == null ? "Unknown" : `${power.battery_wear_percent}%`)}
+            ${card("Charging", power.is_charging ?? alert.is_charging ?? system.battery_plugged ? "Yes" : "No")}
+            ${card("Power Source", power.power_source || (system.battery_plugged ? "AC Power" : "Battery"))}
+            ${card("Time Remaining", secs(power.estimated_remaining_seconds ?? system.battery_secs_left))}
             ${card("Battery Saver", typeof batteryPercent === "number" && batteryPercent <= 20 ? "Recommended" : "Normal")}
-            ${card("Power Mode", system.battery_plugged ? "AC Power" : "Battery")}
-            ${card("Temperature", fmt(system.temperature_celsius, " C"))}
-            ${card("Alert Status", alert.alert_active ? "Active" : "Idle")}
+            ${card("Charge Cycles", fmt(power.charge_cycles))}
+            ${card("Temperature", power.battery_temperature_celsius == null ? fmt(system.temperature_celsius, " C") : `${power.battery_temperature_celsius} C`)}
+            ${card("Last Event", power.last_event_type || "None")}
           </div>
           <div class="card" style="margin-top:10px">
-            <div class="label">Low Battery Alert Settings</div>
+            <div class="label">Power Alert Settings</div>
             <div class="grid cols-3" style="margin-top:10px">
-              <button class="button ${settings.enabled ? "" : "ghost"}" id="alert-enabled">${settings.enabled ? "Enabled" : "Disabled"}</button>
+              <button class="button ${powerSettings.enabled ? "" : "ghost"}" id="power-enabled">${powerSettings.enabled ? "Enabled" : "Disabled"}</button>
+              <button class="button ${powerSettings.charger_connected_alerts ? "" : "ghost"}" id="charger-alerts">${powerSettings.charger_connected_alerts ? "Charger Alerts" : "Charger Muted"}</button>
+              <button class="button ${powerSettings.fluctuation_detection_enabled ? "" : "ghost"}" id="fluctuation-alerts">${powerSettings.fluctuation_detection_enabled ? "Fluctuation On" : "Fluctuation Off"}</button>
               <select class="select" id="threshold">
-                ${[10, 15, 20, 25, 30].map((value) => `<option value="${value}" ${settings.threshold_percent === value ? "selected" : ""}>${value}% threshold</option>`).join("")}
+                ${[10, 15, 20, 25, 30].map((value) => `<option value="${value}" ${settings.threshold_percent === value ? "selected" : ""}>${value}% low threshold</option>`).join("")}
               </select>
               <select class="select" id="repeat">
                 ${[
@@ -692,6 +777,16 @@
                 ].map(([value, label]) => `<option value="${value}" ${settings.repeat_interval_seconds === value ? "selected" : ""}>${label}</option>`).join("")}
               </select>
             </div>
+          </div>
+          <div class="card" style="margin-top:10px">
+            <div class="label">Recent Power Events</div>
+            <div class="list" style="margin-top:8px">
+              ${events.length ? events.map((event) => `<div class="row"><div><div class="small">${event.title}</div><span class="pill">${event.event_type}</span></div><div class="small">${new Date(event.created_at).toLocaleTimeString()}</div></div>`).join("") : `<div class="empty">No power events recorded</div>`}
+            </div>
+          </div>
+          <div class="card" style="margin-top:10px">
+            <div class="label">Charge Sessions</div>
+            <div class="small">${sessions.length ? sessions.map((session) => `${session.start_percent ?? "?"}% to ${session.end_percent ?? "active"}%`).join(" | ") : "No charge sessions recorded"}</div>
           </div>`);
       }
 
@@ -820,6 +915,99 @@
           </div>`);
       }
 
+      function renderFocus() {
+        const focus = state.focusStatus || {};
+        const detail = focus.detail || {};
+        return renderShell("Focus Mode", "Distraction-free productivity", `
+          <div class="grid cols-3">
+            ${card("Status", focus.active ? "Active" : "Idle")}
+            ${card("Remaining", focus.active ? `${Math.floor((focus.remaining_seconds || 0) / 60)}m` : "None")}
+            ${card("Progress", focus.active ? `${Math.round(focus.session_progress_percent || 0)}%` : "0%")}
+            ${card("Goal", detail.current_goal || "Not set")}
+            ${card("Score", focus.productivity_score == null ? "Pending" : `${Math.round(focus.productivity_score)}%`)}
+            ${card("Blocked", (detail.blocked_websites || []).length)}
+          </div>
+          <div class="card" style="margin-top:10px">
+            <button class="button" id="focus-start">Start Focus</button>
+            <button class="button ghost" id="focus-pause">Pause</button>
+            <button class="button ghost" id="focus-resume">Resume</button>
+            <button class="button ghost" id="focus-end">End</button>
+          </div>`);
+      }
+
+      function renderStudy() {
+        const study = state.studyDashboard || {};
+        const subjects = study.subjects || [];
+        const exams = study.exams || [];
+        const recommendations = study.recommendations || [];
+        return renderShell("Study Assistant", "Exam coach and progress tracker", `
+          <div class="grid cols-3">
+            ${card("Readiness", `${Math.round(study.readiness_score || 0)}%`)}
+            ${card("Study Today", `${Math.round((study.today_study_seconds || 0) / 60)}m`)}
+            ${card("Subjects", subjects.length)}
+            ${card("Upcoming Exams", exams.length)}
+            ${card("Next Exam", exams[0] ? `${exams[0].days_remaining}d` : "None")}
+            ${card("Offline", study.offline_ready ? "Ready" : "Unknown")}
+          </div>
+          <div class="card" style="margin-top:10px">
+            <div class="label">Recommendations</div>
+            <div class="list" style="margin-top:8px">
+              ${recommendations.length ? recommendations.slice(0, 4).map((item) => `<div class="row"><div><div class="small">${item.title}</div><span class="pill">${item.priority}</span></div></div>`).join("") : `<div class="empty">No study recommendations yet</div>`}
+            </div>
+          </div>
+          <div class="card" style="margin-top:10px">
+            <button class="button" id="study-session">Record 25m Study</button>
+            <button class="button ghost" id="study-refresh">Refresh</button>
+          </div>`);
+      }
+
+      function renderTimeline() {
+        const memory = state.timelineDashboard || {};
+        const stats = memory.stats || {};
+        const events = memory.events || [];
+        const summary = memory.summary || {};
+        return renderShell("Memory Timeline", "Recent activity and daily summary", `
+          <div class="grid cols-3">
+            ${card("Events", stats.total_events || 0)}
+            ${card("Coding", `${Math.round((stats.coding_seconds || 0) / 60)}m`)}
+            ${card("Study", `${Math.round((stats.study_seconds || 0) / 60)}m`)}
+            ${card("Focus", `${Math.round((stats.focus_seconds || 0) / 60)}m`)}
+            ${card("Goals", stats.goals_achieved || 0)}
+            ${card("Offline", memory.offline_ready ? "Ready" : "Unknown")}
+          </div>
+          <div class="card" style="margin-top:10px">
+            <div class="label">Today</div>
+            <div class="small" style="margin-top:6px">${summary.summary || "No timeline summary yet."}</div>
+          </div>
+          <div class="card" style="margin-top:10px">
+            <div class="label">Recent Activity</div>
+            <div class="list" style="margin-top:8px">
+              ${events.length ? events.slice(0, 5).map((event) => `<div class="row"><div><div class="small">${event.title}</div><span class="pill">${event.event_type}</span></div><div class="small">${new Date(event.created_at).toLocaleTimeString()}</div></div>`).join("") : `<div class="empty">No memory events today</div>`}
+            </div>
+          </div>`);
+      }
+
+      function renderGuardian() {
+        const guardian = state.guardianDashboard || {};
+        const projects = guardian.projects || [];
+        const backups = guardian.backups || [];
+        const recovery = guardian.recovery_points || [];
+        const health = guardian.health || [];
+        return renderShell("Project Guardian", "Protection and recovery", `
+          <div class="grid cols-3">
+            ${card("Projects", projects.length)}
+            ${card("Backups", backups.length)}
+            ${card("Recovery", recovery.length)}
+            ${card("Health", health[0] ? `${Math.round(health[0].health_score)}%` : "Pending")}
+            ${card("Risk", health[0]?.risk_level || "Unknown")}
+            ${card("Offline", guardian.offline_ready ? "Ready" : "Unknown")}
+          </div>
+          <div class="card" style="margin-top:10px">
+            <button class="button" id="guardian-snapshot">Snapshot NEXA</button>
+            <button class="button ghost" id="guardian-refresh">Refresh</button>
+          </div>`);
+      }
+
       function renderSettings() {
         const settings = state.batterySettings || {};
         return renderShell("Settings", "Theme, voice, notifications, AI provider, and preferences", `
@@ -893,6 +1081,10 @@
           browser: renderBrowser,
           media: renderMedia,
           automation: renderAutomation,
+          focus: renderFocus,
+          study: renderStudy,
+          timeline: renderTimeline,
+          guardian: renderGuardian,
           chat: renderChat,
           settings: renderSettings,
           status: renderStatus
@@ -903,11 +1095,13 @@
 
       function renderRadial() {
         const items = placeModules(activeRadialModules());
+        const mic = state.voiceStatus?.microphone_status || "offline";
+        const activeMic = ["listening", "processing", "speaking"].includes(mic);
         root.innerHTML = `
           <div class="radial-shell">
-            <div class="center-orb" id="status-panel" role="button" aria-label="Nexa status hub">
+            <div class="center-orb ${activeMic ? "listening" : ""}" id="status-panel" role="button" aria-label="Nexa status hub">
               <button class="center-close" id="center-close" title="Close" aria-label="Close orbital menu">×</button>
-              <div><strong>NEXA</strong><span>Nexa Active</span></div>
+              <div><strong>NEXA</strong><span>${mic}</span></div>
             </div>
             ${items.map((item) => `
               <button class="radial-item" data-panel="${item.id}" aria-label="${item.label}" style="--x:${item.x}px;--y:${item.y}px;--delay:${item.delay}ms">
@@ -920,7 +1114,9 @@
       }
 
       function renderBubble() {
-        root.innerHTML = `<button class="bubble" id="bubble" title="Nexa" aria-label="Open Nexa Orbital Assistant">N<span class="bubble-status"></span></button>`;
+        const mic = state.voiceStatus?.microphone_status || "offline";
+        const activeMic = ["listening", "processing", "speaking"].includes(mic);
+        root.innerHTML = `<button class="bubble ${activeMic ? "listening" : ""}" id="bubble" title="Nexa ${mic}" aria-label="Open Nexa Orbital Assistant">N<span class="bubble-status"></span></button>`;
         const bubble = document.getElementById("bubble");
         bubble.onclick = () => {
           if (bubble.dataset.dragMoved === "true") return;
@@ -1036,11 +1232,22 @@
           resize("chat");
         });
         document.getElementById("alert-enabled")?.addEventListener("click", () => updateBatterySettings({ enabled: !state.batterySettings.enabled }));
+        document.getElementById("power-enabled")?.addEventListener("click", () => updatePowerSettings({ enabled: !state.powerSettings.enabled }));
+        document.getElementById("charger-alerts")?.addEventListener("click", () => updatePowerSettings({ charger_connected_alerts: !state.powerSettings.charger_connected_alerts, charger_disconnected_alerts: !state.powerSettings.charger_disconnected_alerts }));
+        document.getElementById("fluctuation-alerts")?.addEventListener("click", () => updatePowerSettings({ fluctuation_detection_enabled: !state.powerSettings.fluctuation_detection_enabled }));
         document.getElementById("threshold")?.addEventListener("change", (event) => updateBatterySettings({ threshold_percent: Number(event.target.value) }));
         document.getElementById("repeat")?.addEventListener("change", (event) => updateBatterySettings({ repeat_interval_seconds: Number(event.target.value) }));
         document.querySelectorAll("[data-folder]").forEach((button) => button.addEventListener("click", () => window.nexa.openFolder(button.dataset.folder)));
         document.querySelectorAll("[data-auto]").forEach((button) => button.addEventListener("click", () => toggleAutomation(Number(button.dataset.auto), button.dataset.enabled === "true")));
         document.querySelectorAll("[data-task]").forEach((button) => button.addEventListener("click", () => taskAction(Number(button.dataset.task), button.dataset.action)));
+        document.getElementById("focus-start")?.addEventListener("click", startFocusQuick);
+        document.getElementById("focus-pause")?.addEventListener("click", () => focusAction("pause", { reason: "orbital" }));
+        document.getElementById("focus-resume")?.addEventListener("click", () => focusAction("resume"));
+        document.getElementById("focus-end")?.addEventListener("click", () => window.nexa.api("/evolution/focus/end", { method: "POST", body: { tasks_completed: 1, goal_completion_percent: 100 } }).then(refresh));
+        document.getElementById("study-session")?.addEventListener("click", () => window.nexa.api("/evolution/study/sessions", { method: "POST", body: { subject_name: "General", duration_minutes: 25, session_type: "study", notes: "Orbital quick action" } }).then(refresh));
+        document.getElementById("study-refresh")?.addEventListener("click", refresh);
+        document.getElementById("guardian-snapshot")?.addEventListener("click", () => window.nexa.api("/evolution/project-guardian/snapshot", { method: "POST", body: { project_path: "C:\\Programs\\codex\\NEXA", action: "orbital_snapshot" } }).then(refresh));
+        document.getElementById("guardian-refresh")?.addEventListener("click", refresh);
         document.querySelectorAll("[data-suggestion]").forEach((button) => button.addEventListener("click", () => {
           const input = document.getElementById("command");
           if (input) input.value = button.dataset.suggestion;
@@ -1059,7 +1266,8 @@
 
       setInterval(() => {
         if (state.view !== "bubble") refresh();
-      }, 5000);
+        else refreshVoiceStatus();
+      }, 30000);
 
       window.addEventListener("keydown", (event) => {
         if (event.key === "Escape") setView("bubble");

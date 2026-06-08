@@ -1,15 +1,19 @@
-import React from "react";
-import { Activity, Cpu, HardDrive, Microchip, RefreshCw, ShieldCheck } from "lucide-react";
-import { api, type BatteryAlertStatus, type GpuMonitorStatus, type Task } from "../lib/api";
+﻿import React from "react";
+import { Activity, CalendarClock, Cpu, HardDrive, Lightbulb, Microchip, RefreshCw, ShieldCheck } from "lucide-react";
+import { api, type BatteryAlertStatus, type GpuMonitorStatus, type NotificationAlert, type PowerMonitorStatus, type ResourceManagerStatus, type Task } from "../lib/api";
 import { Panel } from "../components/Panel";
 
 type DashboardData = {
   system: { cpu_percent: number; ram_percent: number; battery_percent: number | null };
   battery_alert: BatteryAlertStatus;
+  power_monitor: PowerMonitorStatus;
+  resource_manager: ResourceManagerStatus;
+  daily_briefing: Record<string, any> | null;
+  briefing_recommendations: Array<Record<string, any>>;
   gpu_monitor: GpuMonitorStatus;
   tasks: Task[];
   automations: unknown[];
-  notifications: { id: number; title: string; message: string }[];
+  notifications: NotificationAlert[];
   scheduled_jobs: unknown[];
 };
 
@@ -18,9 +22,9 @@ export function Dashboard() {
   const load = React.useCallback(() => api<DashboardData>("/dashboard").then(setData), []);
   React.useEffect(() => {
     load();
-    const timer = window.setInterval(load, 5000);
+    const timer = window.setInterval(load, data?.resource_manager.power_saving || data?.resource_manager.thermal_protection ? 60000 : 30000);
     return () => window.clearInterval(timer);
-  }, [load]);
+  }, [load, data?.resource_manager.power_saving, data?.resource_manager.thermal_protection]);
 
   return (
     <div className="space-y-5">
@@ -31,6 +35,23 @@ export function Dashboard() {
         <Metric icon={<ShieldCheck size={18} />} label="Battery" value={data?.system.battery_percent == null ? "N/A" : `${data.system.battery_percent}%`} />
       </div>
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.35fr_0.65fr]">
+        <Panel title="Daily Briefing">
+          <div className="space-y-3">
+            <div className="nexa-card rounded-xl p-4">
+              <div className="mb-2 flex items-center gap-2 text-sm text-amber-100/70"><CalendarClock size={18} /> Personal Secretary</div>
+              <p className="text-sm leading-6 text-slate-200">{data?.daily_briefing?.summary ?? "Generate today's briefing from the Briefing page."}</p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {(data?.briefing_recommendations ?? []).slice(0, 2).map((item) => (
+                <div key={item.id} className="nexa-card rounded-xl p-3 text-sm">
+                  <div className="mb-1 flex items-center gap-2 text-amber-100"><Lightbulb size={16} /> {item.title}</div>
+                  <div className="text-slate-400">{item.message}</div>
+                </div>
+              ))}
+              {(data?.briefing_recommendations ?? []).length === 0 && <Empty label="No secretary recommendations" />}
+            </div>
+          </div>
+        </Panel>
         <Panel title="Running Tasks">
           <div className="max-h-[420px] space-y-2 overflow-auto pr-1">
             {(data?.tasks ?? []).map((task) => (
@@ -48,6 +69,11 @@ export function Dashboard() {
               <div key={item.id} className="nexa-card rounded-xl px-3 py-3">
                 <div className="break-words text-sm font-medium text-slate-100">{item.title}</div>
                 <div className="text-xs text-slate-300">{item.message}</div>
+                <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-400">
+                  <span>{item.module}</span>
+                  <span>{item.severity}</span>
+                  <span>{item.suggested_action}</span>
+                </div>
               </div>
             ))}
             {(data?.notifications ?? []).length === 0 && <Empty label="No recent notifications" />}
@@ -69,13 +95,13 @@ export function Dashboard() {
           </div>
         </Panel>
       </div>
-      <Panel title="Battery Alert">
+      <Panel title="Battery Power Monitor">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          <Status icon={<ShieldCheck size={18} />} label="Battery Status" value={data?.battery_alert.battery_percent == null ? "Unavailable" : "Available"} />
-          <Status icon={<Activity size={18} />} label="Battery %" value={data?.battery_alert.battery_percent == null ? "N/A" : `${data.battery_alert.battery_percent}%`} />
-          <Status icon={<Activity size={18} />} label="Charging Status" value={data?.battery_alert.is_charging == null ? "Unknown" : data.battery_alert.is_charging ? "Charging" : "Not charging"} />
-          <Status icon={<RefreshCw size={18} />} label="Alert Status" value={data?.battery_alert.alert_active ? "Active" : "Idle"} />
-          <Status icon={<Activity size={18} />} label="Last Alert Time" value={data?.battery_alert.last_alert_time ? new Date(data.battery_alert.last_alert_time).toLocaleTimeString() : "Never"} />
+          <Status icon={<ShieldCheck size={18} />} label="Battery %" value={data?.power_monitor.battery_percent == null ? "N/A" : `${data.power_monitor.battery_percent}%`} />
+          <Status icon={<Activity size={18} />} label="Charging Status" value={data?.power_monitor.is_charging == null ? "Unknown" : data.power_monitor.is_charging ? "Charging" : "On battery"} />
+          <Status icon={<RefreshCw size={18} />} label="Power Source" value={data?.power_monitor.power_source ?? "unknown"} />
+          <Status icon={<Activity size={18} />} label="Health Score" value={data?.power_monitor.battery_health_percent == null ? "Unknown" : `${data.power_monitor.battery_health_percent}%`} />
+          <Status icon={<Activity size={18} />} label="Last Event" value={data?.power_monitor.last_event_type ?? "None"} />
         </div>
       </Panel>
       <Panel title="GPU Monitor">
@@ -107,3 +133,5 @@ function Status({ icon, label, value }: { icon: React.ReactNode; label: string; 
 function Empty({ label }: { label: string }) {
   return <div className="rounded-xl border border-dashed border-amber-200/15 px-3 py-6 text-center text-sm text-slate-400">{label}</div>;
 }
+
+

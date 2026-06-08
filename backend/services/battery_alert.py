@@ -154,10 +154,24 @@ class BatteryAlertService:
         return int(round(battery.percent)), bool(battery.power_plugged)
 
     def _trigger_alert(self, settings: BatteryAlertSettings, percent: int, charging: bool | None) -> None:
-        message = f"Only {percent}% battery remaining.\nPlease connect your charger."
+        message = f"Battery level has dropped to {percent}%.\nPlease connect your charger."
         if settings.notification_enabled:
             with self.db_factory() as db:
-                NotificationAgent(db).notify("Nexa Battery Alert", message)
+                NotificationAgent(db).notify(
+                    "Nexa Battery Alert",
+                    message,
+                    alert_type="battery",
+                    module="battery_alert",
+                    severity="high" if percent <= 10 else "medium",
+                    priority="high" if percent <= 10 else "medium",
+                    category="warning",
+                    suggested_action="Connect your charger.",
+                    action_buttons=["Open Battery Details", "Dismiss", "Snooze 10 Minutes"],
+                    voice_message="Battery level is low. Please connect your charger.",
+                    sound_enabled=False,
+                    voice_enabled=False,
+                    metadata={"battery_percent": percent, "is_charging": charging, "threshold_percent": settings.threshold_percent},
+                )
         if settings.sound_enabled:
             self._play_sound()
         if settings.voice_enabled:
@@ -190,6 +204,7 @@ class BatteryAlertService:
             import winsound
 
             winsound.PlaySound(str(self.sound_path), winsound.SND_FILENAME | winsound.SND_ASYNC)
+            logging.getLogger("nexa.alerts").info("Sound Played module=battery_alert sound=%s reason=low_battery", self.sound_path)
         except Exception:
             logger.exception("Battery alert sound playback failed")
 
@@ -209,6 +224,7 @@ class BatteryAlertService:
                 stderr=subprocess.DEVNULL,
                 shell=False,
             )
+            logging.getLogger("nexa.alerts").info("Voice Played module=battery_alert text=%s", text)
         except Exception:
             logger.exception("Battery alert voice playback failed")
 
