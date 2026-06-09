@@ -1,5 +1,5 @@
 import React from "react";
-import { Activity, BatteryCharging, Bell, BookOpen, Bot, Brain, CalendarClock, Camera, Code2, Download, Focus, Gauge, Globe, LayoutDashboard, Menu, Settings, Shield, Sparkles, Workflow, X } from "lucide-react";
+import { Activity, BatteryCharging, Bell, BookOpen, Bot, Brain, BrainCircuit, CalendarClock, Camera, Code2, Download, Focus, Gauge, Globe, GraduationCap, LayoutDashboard, LifeBuoy, Menu, Mic2, Settings, Shield, Smartphone, Sparkles, Target, Workflow, X } from "lucide-react";
 import { Dashboard } from "./pages/Dashboard";
 import { Chat } from "./pages/Chat";
 import { CodingAnalytics } from "./pages/CodingAnalytics";
@@ -17,16 +17,28 @@ import { StudyAssistant } from "./pages/StudyAssistant";
 import { ProjectGuardian } from "./pages/ProjectGuardian";
 import { DownloadManager } from "./pages/DownloadManager";
 import { ScreenshotAssistant } from "./pages/ScreenshotAssistant";
+import { CollegeCompanion } from "./pages/CollegeCompanion";
+import { EmergencyRecovery } from "./pages/EmergencyRecovery";
+import { VoicePersonality } from "./pages/VoicePersonality";
+import { GoalTracker } from "./pages/GoalTracker";
+import { MobileCompanion } from "./pages/MobileCompanion";
+import { CopilotCenter } from "./pages/CopilotCenter";
 
 const pages = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, component: Dashboard },
   { id: "chat", label: "Chat", icon: Bot, component: Chat },
+  { id: "copilot", label: "Copilot", icon: BrainCircuit, component: CopilotCenter },
   { id: "automation", label: "Automation", icon: Workflow, component: Automations },
   { id: "alerts", label: "Alerts", icon: Bell, component: Alerts },
   { id: "briefing", label: "Briefing", icon: CalendarClock, component: DailyBriefingPage },
   { id: "focus", label: "Focus Mode", icon: Focus, component: FocusModePage },
   { id: "study", label: "Study", icon: BookOpen, component: StudyAssistant },
+  { id: "goals", label: "Goals", icon: Target, component: GoalTracker },
+  { id: "college", label: "College", icon: GraduationCap, component: CollegeCompanion },
   { id: "guardian", label: "Guardian", icon: Shield, component: ProjectGuardian },
+  { id: "recovery", label: "Recovery", icon: LifeBuoy, component: EmergencyRecovery },
+  { id: "voice", label: "Voice", icon: Mic2, component: VoicePersonality },
+  { id: "mobile", label: "Mobile", icon: Smartphone, component: MobileCompanion },
   { id: "downloads", label: "Downloads", icon: Download, component: DownloadManager },
   { id: "screenshots", label: "Screenshots", icon: Camera, component: ScreenshotAssistant },
   { id: "battery", label: "Battery Health", icon: BatteryCharging, component: BatteryHealth },

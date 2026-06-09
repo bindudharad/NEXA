@@ -232,6 +232,93 @@ class Automation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class AutomationTrigger(Base):
+    __tablename__ = "automation_triggers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    automation_id: Mapped[int] = mapped_column(ForeignKey("automations.id"), index=True)
+    trigger_type: Mapped[str] = mapped_column(String(100), index=True)
+    event_type: Mapped[str] = mapped_column(String(120), default="", index=True)
+    metric: Mapped[str] = mapped_column(String(120), default="")
+    operator: Mapped[str] = mapped_column(String(20), default="")
+    value_json: Mapped[str] = mapped_column(Text, default="null")
+    schedule_json: Mapped[str] = mapped_column(Text, default="{}")
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AutomationCondition(Base):
+    __tablename__ = "automation_conditions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    automation_id: Mapped[int] = mapped_column(ForeignKey("automations.id"), index=True)
+    condition_type: Mapped[str] = mapped_column(String(80), default="rule")
+    expression_json: Mapped[str] = mapped_column(Text, default="{}")
+    join_operator: Mapped[str] = mapped_column(String(20), default="AND")
+    priority: Mapped[int] = mapped_column(Integer, default=100)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AutomationAction(Base):
+    __tablename__ = "automation_actions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    automation_id: Mapped[int] = mapped_column(ForeignKey("automations.id"), index=True)
+    action_type: Mapped[str] = mapped_column(String(100), index=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    requires_approval: Mapped[bool] = mapped_column(Boolean, default=False)
+    risk_level: Mapped[str] = mapped_column(String(40), default="low")
+    order_index: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(40), default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AutomationHistory(Base):
+    __tablename__ = "automation_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    automation_id: Mapped[int | None] = mapped_column(ForeignKey("automations.id"), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(100), index=True)
+    trigger_event_json: Mapped[str] = mapped_column(Text, default="{}")
+    result_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(40), default="recorded", index=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+    approval_status: Mapped[str] = mapped_column(String(40), default="")
+    runtime_ms: Mapped[float] = mapped_column(Float, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AutomationTemplate(Base):
+    __tablename__ = "automation_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(160), index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    category: Mapped[str] = mapped_column(String(80), default="custom", index=True)
+    trigger_json: Mapped[str] = mapped_column(Text, default="{}")
+    conditions_json: Mapped[str] = mapped_column(Text, default="[]")
+    actions_json: Mapped[str] = mapped_column(Text, default="[]")
+    schedule_json: Mapped[str] = mapped_column(Text, default="{}")
+    approval_rules_json: Mapped[str] = mapped_column(Text, default="{}")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AutomationAnalytics(Base):
+    __tablename__ = "automation_analytics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    automation_id: Mapped[int | None] = mapped_column(ForeignKey("automations.id"), nullable=True, index=True)
+    analytics_date: Mapped[str] = mapped_column(String(20), index=True)
+    execution_count: Mapped[int] = mapped_column(Integer, default=0)
+    success_count: Mapped[int] = mapped_column(Integer, default=0)
+    failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    approval_count: Mapped[int] = mapped_column(Integer, default=0)
+    average_runtime_ms: Mapped[float] = mapped_column(Float, default=0)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class Memory(Base):
     __tablename__ = "memory"
 
@@ -431,6 +518,83 @@ class VoiceInteraction(Base):
     mode: Mapped[str] = mapped_column(String(80), default="offline")
     status: Mapped[str] = mapped_column(String(80), default="completed")
     detail_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class VoiceProfile(Base):
+    __tablename__ = "voice_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_key: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    style: Mapped[str] = mapped_column(String(80), default="professional")
+    description: Mapped[str] = mapped_column(Text, default="")
+    wake_responses_json: Mapped[str] = mapped_column(Text, default="[]")
+    completion_responses_json: Mapped[str] = mapped_column(Text, default="[]")
+    reminder_responses_json: Mapped[str] = mapped_column(Text, default="[]")
+    error_responses_json: Mapped[str] = mapped_column(Text, default="[]")
+    notification_responses_json: Mapped[str] = mapped_column(Text, default="{}")
+    tts_settings_json: Mapped[str] = mapped_column(Text, default="{}")
+    built_in: Mapped[bool] = mapped_column(Boolean, default=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CustomPersonality(Base):
+    __tablename__ = "custom_personalities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(160), index=True)
+    greeting_style: Mapped[str] = mapped_column(Text, default="")
+    wake_responses_json: Mapped[str] = mapped_column(Text, default="[]")
+    completion_responses_json: Mapped[str] = mapped_column(Text, default="[]")
+    reminder_responses_json: Mapped[str] = mapped_column(Text, default="[]")
+    error_responses_json: Mapped[str] = mapped_column(Text, default="[]")
+    notification_responses_json: Mapped[str] = mapped_column(Text, default="{}")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class VoiceHistory(Base):
+    __tablename__ = "voice_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(100), index=True)
+    personality: Mapped[str] = mapped_column(String(80), default="professional", index=True)
+    input_text: Mapped[str] = mapped_column(Text, default="")
+    response_text: Mapped[str] = mapped_column(Text, default="")
+    context_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(40), default="completed", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class WakeWordHistory(Base):
+    __tablename__ = "wake_word_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    phrase: Mapped[str] = mapped_column(String(160), index=True)
+    source: Mapped[str] = mapped_column(String(120), default="api")
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    personality: Mapped[str] = mapped_column(String(80), default="professional")
+    response_text: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(40), default="detected", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class VoiceAnalytics(Base):
+    __tablename__ = "voice_analytics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    analytics_date: Mapped[str] = mapped_column(String(20), index=True)
+    personality: Mapped[str] = mapped_column(String(80), default="professional", index=True)
+    wake_count: Mapped[int] = mapped_column(Integer, default=0)
+    command_count: Mapped[int] = mapped_column(Integer, default=0)
+    spoken_response_count: Mapped[int] = mapped_column(Integer, default=0)
+    error_count: Mapped[int] = mapped_column(Integer, default=0)
+    muted_count: Mapped[int] = mapped_column(Integer, default=0)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -843,6 +1007,110 @@ class AchievementHistory(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class HealthMetric(Base):
+    __tablename__ = "health_metrics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    metric_type: Mapped[str] = mapped_column(String(80), index=True)
+    module: Mapped[str] = mapped_column(String(120), default="nexa")
+    value: Mapped[float] = mapped_column(Float, default=0)
+    unit: Mapped[str] = mapped_column(String(40), default="")
+    status: Mapped[str] = mapped_column(String(40), default="ok")
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ResourceUsage(Base):
+    __tablename__ = "resource_usage"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cpu_percent: Mapped[float] = mapped_column(Float, default=0)
+    average_cpu_percent: Mapped[float] = mapped_column(Float, default=0)
+    peak_cpu_percent: Mapped[float] = mapped_column(Float, default=0)
+    ram_mb: Mapped[float] = mapped_column(Float, default=0)
+    average_ram_mb: Mapped[float] = mapped_column(Float, default=0)
+    peak_ram_mb: Mapped[float] = mapped_column(Float, default=0)
+    gpu_percent: Mapped[float] = mapped_column(Float, default=0)
+    battery_impact_score: Mapped[float] = mapped_column(Float, default=0)
+    thermal_impact_score: Mapped[float] = mapped_column(Float, default=0)
+    mode: Mapped[str] = mapped_column(String(80), default="normal")
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class APIHealth(Base):
+    __tablename__ = "api_health"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    api_name: Mapped[str] = mapped_column(String(120), index=True)
+    latency_ms: Mapped[float] = mapped_column(Float, default=0)
+    success_rate: Mapped[float] = mapped_column(Float, default=100)
+    failure_rate: Mapped[float] = mapped_column(Float, default=0)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(40), default="healthy")
+    error_message: Mapped[str] = mapped_column(Text, default="")
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AutomationHealth(Base):
+    __tablename__ = "automation_health"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    executions: Mapped[int] = mapped_column(Integer, default=0)
+    failures: Mapped[int] = mapped_column(Integer, default=0)
+    retries: Mapped[int] = mapped_column(Integer, default=0)
+    pending_approvals: Mapped[int] = mapped_column(Integer, default=0)
+    disabled_automations: Mapped[int] = mapped_column(Integer, default=0)
+    average_runtime_ms: Mapped[float] = mapped_column(Float, default=0)
+    success_rate: Mapped[float] = mapped_column(Float, default=100)
+    status: Mapped[str] = mapped_column(String(40), default="healthy")
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ErrorLog(Base):
+    __tablename__ = "error_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    module: Mapped[str] = mapped_column(String(120), index=True)
+    severity: Mapped[str] = mapped_column(String(40), default="error")
+    message: Mapped[str] = mapped_column(Text, default="")
+    stack_trace: Mapped[str] = mapped_column(Text, default="")
+    source_file: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(40), default="open")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class HealthScore(Base):
+    __tablename__ = "health_scores"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    overall_score: Mapped[float] = mapped_column(Float, default=100)
+    performance_score: Mapped[float] = mapped_column(Float, default=100)
+    reliability_score: Mapped[float] = mapped_column(Float, default=100)
+    resource_score: Mapped[float] = mapped_column(Float, default=100)
+    module_scores_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(40), default="excellent")
+    recommendations_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class OptimizationEvent(Base):
+    __tablename__ = "optimization_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(80), index=True)
+    module: Mapped[str] = mapped_column(String(120), default="nexa")
+    title: Mapped[str] = mapped_column(String(220))
+    message: Mapped[str] = mapped_column(Text, default="")
+    action_taken: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(40), default="recorded")
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class ProjectBackup(Base):
     __tablename__ = "project_backups"
 
@@ -943,6 +1211,94 @@ class ProjectEvent(Base):
     title: Mapped[str] = mapped_column(String(220))
     message: Mapped[str] = mapped_column(Text, default="")
     severity: Mapped[str] = mapped_column(String(40), default="low")
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CrashReport(Base):
+    __tablename__ = "crash_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    crash_type: Mapped[str] = mapped_column(String(100), index=True)
+    source: Mapped[str] = mapped_column(String(120), default="emergency_recovery")
+    application: Mapped[str] = mapped_column(String(160), default="")
+    severity: Mapped[str] = mapped_column(String(40), default="high")
+    message: Mapped[str] = mapped_column(Text, default="")
+    stack_trace: Mapped[str] = mapped_column(Text, default="")
+    diagnostics_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(40), default="open", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class RecoveryEvent(Base):
+    __tablename__ = "recovery_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(100), index=True)
+    source: Mapped[str] = mapped_column(String(120), default="emergency_recovery")
+    title: Mapped[str] = mapped_column(String(220))
+    message: Mapped[str] = mapped_column(Text, default="")
+    severity: Mapped[str] = mapped_column(String(40), default="medium")
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class RecoverySession(Base):
+    __tablename__ = "recovery_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_type: Mapped[str] = mapped_column(String(100), default="workspace", index=True)
+    status: Mapped[str] = mapped_column(String(40), default="captured", index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    workspace_state_json: Mapped[str] = mapped_column(Text, default="{}")
+    restore_plan_json: Mapped[str] = mapped_column(Text, default="[]")
+    restored_items_json: Mapped[str] = mapped_column(Text, default="[]")
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+
+
+class IncidentReport(Base):
+    __tablename__ = "incident_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    incident_type: Mapped[str] = mapped_column(String(100), index=True)
+    title: Mapped[str] = mapped_column(String(220))
+    summary: Mapped[str] = mapped_column(Text, default="")
+    applications_affected_json: Mapped[str] = mapped_column(Text, default="[]")
+    recovery_actions_json: Mapped[str] = mapped_column(Text, default="[]")
+    recovered_items_json: Mapped[str] = mapped_column(Text, default="[]")
+    errors_json: Mapped[str] = mapped_column(Text, default="[]")
+    recommendations_json: Mapped[str] = mapped_column(Text, default="[]")
+    status: Mapped[str] = mapped_column(String(40), default="open", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class RecoveredApplication(Base):
+    __tablename__ = "recovered_applications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_id: Mapped[int | None] = mapped_column(ForeignKey("recovery_sessions.id"), nullable=True, index=True)
+    app_name: Mapped[str] = mapped_column(String(160), index=True)
+    process_name: Mapped[str] = mapped_column(String(160), default="")
+    workspace_path: Mapped[str] = mapped_column(Text, default="")
+    open_files_json: Mapped[str] = mapped_column(Text, default="[]")
+    terminal_state_json: Mapped[str] = mapped_column(Text, default="{}")
+    restore_command: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(40), default="available", index=True)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class RecoveryHistory(Base):
+    __tablename__ = "recovery_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(100), index=True)
+    title: Mapped[str] = mapped_column(String(220))
+    message: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(40), default="recorded", index=True)
     metadata_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -1123,14 +1479,89 @@ class Goal(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     title: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text, default="")
     goal_type: Mapped[str] = mapped_column(String(80), default="custom")
+    category: Mapped[str] = mapped_column(String(80), default="custom")
+    priority: Mapped[str] = mapped_column(String(40), default="medium")
     target_value: Mapped[float] = mapped_column(Float, default=1)
     current_value: Mapped[float] = mapped_column(Float, default=0)
     unit: Mapped[str] = mapped_column(String(40), default="count")
     period: Mapped[str] = mapped_column(String(40), default="daily")
+    deadline: Mapped[str] = mapped_column(String(40), default="")
+    reminder_settings_json: Mapped[str] = mapped_column(Text, default="{}")
     status: Mapped[str] = mapped_column(String(40), default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class GoalProgress(Base):
+    __tablename__ = "goal_progress"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    goal_id: Mapped[int] = mapped_column(ForeignKey("goals.id"), index=True)
+    delta_value: Mapped[float] = mapped_column(Float, default=0)
+    current_value: Mapped[float] = mapped_column(Float, default=0)
+    progress_percent: Mapped[float] = mapped_column(Float, default=0)
+    source: Mapped[str] = mapped_column(String(120), default="manual")
+    note: Mapped[str] = mapped_column(Text, default="")
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class GoalHistory(Base):
+    __tablename__ = "goal_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    goal_id: Mapped[int | None] = mapped_column(ForeignKey("goals.id"), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(80), index=True)
+    title: Mapped[str] = mapped_column(String(220))
+    message: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(40), default="recorded")
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class Streak(Base):
+    __tablename__ = "streaks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    goal_id: Mapped[int | None] = mapped_column(ForeignKey("goals.id"), nullable=True, index=True)
+    streak_type: Mapped[str] = mapped_column(String(80), index=True)
+    current_count: Mapped[int] = mapped_column(Integer, default=0)
+    best_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_activity_date: Mapped[str] = mapped_column(String(20), default="")
+    status: Mapped[str] = mapped_column(String(40), default="active")
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class GoalAnalytics(Base):
+    __tablename__ = "goal_analytics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    goal_id: Mapped[int | None] = mapped_column(ForeignKey("goals.id"), nullable=True, index=True)
+    analytics_date: Mapped[str] = mapped_column(String(20), index=True)
+    progress_value: Mapped[float] = mapped_column(Float, default=0)
+    progress_percent: Mapped[float] = mapped_column(Float, default=0)
+    completion_rate: Mapped[float] = mapped_column(Float, default=0)
+    estimated_completion_days: Mapped[float] = mapped_column(Float, default=0)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class GoalReminder(Base):
+    __tablename__ = "goal_reminders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    goal_id: Mapped[int | None] = mapped_column(ForeignKey("goals.id"), nullable=True, index=True)
+    reminder_type: Mapped[str] = mapped_column(String(80), index=True)
+    message: Mapped[str] = mapped_column(Text, default="")
+    due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String(40), default="pending")
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class Achievement(Base):
@@ -1162,6 +1593,89 @@ class CopilotSuggestion(Base):
     acted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class ContextSnapshot(Base):
+    __tablename__ = "context_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    current_app: Mapped[str] = mapped_column(String(160), default="")
+    current_window: Mapped[str] = mapped_column(String(240), default="")
+    activity_type: Mapped[str] = mapped_column(String(80), default="idle")
+    priority_context: Mapped[str] = mapped_column(String(80), default="normal")
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    privacy_mode: Mapped[str] = mapped_column(String(80), default="local")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CopilotInsight(Base):
+    __tablename__ = "copilot_insights"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    insight_type: Mapped[str] = mapped_column(String(80), index=True)
+    title: Mapped[str] = mapped_column(String(220))
+    message: Mapped[str] = mapped_column(Text, default="")
+    period: Mapped[str] = mapped_column(String(40), default="daily")
+    severity: Mapped[str] = mapped_column(String(40), default="low")
+    recommendation: Mapped[str] = mapped_column(Text, default="")
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CopilotWarning(Base):
+    __tablename__ = "copilot_warnings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    warning_type: Mapped[str] = mapped_column(String(80), index=True)
+    module: Mapped[str] = mapped_column(String(120), default="copilot")
+    title: Mapped[str] = mapped_column(String(220))
+    message: Mapped[str] = mapped_column(Text, default="")
+    severity: Mapped[str] = mapped_column(String(40), default="medium")
+    status: Mapped[str] = mapped_column(String(40), default="open")
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class CopilotAction(Base):
+    __tablename__ = "copilot_actions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    suggestion_id: Mapped[int | None] = mapped_column(ForeignKey("copilot_suggestions.id"), nullable=True, index=True)
+    action_type: Mapped[str] = mapped_column(String(100), index=True)
+    title: Mapped[str] = mapped_column(String(220))
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(40), default="available")
+    result_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class CopilotHistory(Base):
+    __tablename__ = "copilot_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(100), index=True)
+    suggestion_id: Mapped[int | None] = mapped_column(ForeignKey("copilot_suggestions.id"), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(220))
+    detail_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(40), default="recorded")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CopilotAnalytics(Base):
+    __tablename__ = "copilot_analytics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    analytics_date: Mapped[str] = mapped_column(String(40), index=True)
+    suggestions_generated: Mapped[int] = mapped_column(Integer, default=0)
+    suggestions_acted: Mapped[int] = mapped_column(Integer, default=0)
+    warnings_open: Mapped[int] = mapped_column(Integer, default=0)
+    critical_count: Mapped[int] = mapped_column(Integer, default=0)
+    helpful_score: Mapped[float] = mapped_column(Float, default=0)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class CollegeUpdate(Base):
     __tablename__ = "college_updates"
 
@@ -1173,6 +1687,254 @@ class CollegeUpdate(Base):
     url: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(40), default="new")
     payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CollegeProfile(Base):
+    __tablename__ = "college_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(160), index=True)
+    portal_type: Mapped[str] = mapped_column(String(80), default="custom")
+    website_profile_id: Mapped[int | None] = mapped_column(ForeignKey("website_profiles.id"), nullable=True, index=True)
+    target_attendance_percent: Mapped[float] = mapped_column(Float, default=75)
+    student_identifier_encrypted: Mapped[str] = mapped_column(Text, default="")
+    session_state_encrypted: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(40), default="active")
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class MobileDevice(Base):
+    __tablename__ = "mobile_devices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    device_name: Mapped[str] = mapped_column(String(160), default="Android Device")
+    device_type: Mapped[str] = mapped_column(String(80), default="android")
+    device_fingerprint: Mapped[str] = mapped_column(String(220), default="")
+    status: Mapped[str] = mapped_column(String(40), default="active")
+    permissions_json: Mapped[str] = mapped_column(Text, default="{}")
+    security_status: Mapped[str] = mapped_column(String(40), default="trusted")
+    last_active_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DeviceToken(Base):
+    __tablename__ = "device_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("mobile_devices.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(128), index=True)
+    refresh_token_hash: Mapped[str] = mapped_column(String(128), index=True)
+    token_type: Mapped[str] = mapped_column(String(40), default="bearer")
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class PairingCode(Base):
+    __tablename__ = "pairing_codes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(16), index=True)
+    token_hash: Mapped[str] = mapped_column(String(128), index=True)
+    qr_payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(40), default="pending")
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    device_id: Mapped[int | None] = mapped_column(ForeignKey("mobile_devices.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class MobileSession(Base):
+    __tablename__ = "mobile_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("mobile_devices.id"), index=True)
+    session_token_hash: Mapped[str] = mapped_column(String(128), index=True)
+    ip_address: Mapped[str] = mapped_column(String(80), default="")
+    user_agent: Mapped[str] = mapped_column(Text, default="")
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class NotificationQueue(Base):
+    __tablename__ = "notification_queue"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    device_id: Mapped[int | None] = mapped_column(ForeignKey("mobile_devices.id"), nullable=True, index=True)
+    notification_id: Mapped[int | None] = mapped_column(ForeignKey("notifications.id"), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(100), default="notification")
+    priority: Mapped[str] = mapped_column(String(40), default="normal")
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(40), default="queued")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class MobilePermission(Base):
+    __tablename__ = "mobile_permissions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("mobile_devices.id"), index=True)
+    permission: Mapped[str] = mapped_column(String(120))
+    allowed: Mapped[bool] = mapped_column(Boolean, default=True)
+    scope_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class MobileAuditLog(Base):
+    __tablename__ = "mobile_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    device_id: Mapped[int | None] = mapped_column(ForeignKey("mobile_devices.id"), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(100), index=True)
+    action: Mapped[str] = mapped_column(String(160), default="")
+    status: Mapped[str] = mapped_column(String(40), default="recorded")
+    ip_address: Mapped[str] = mapped_column(String(80), default="")
+    detail_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class SyncQueue(Base):
+    __tablename__ = "sync_queue"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    device_id: Mapped[int | None] = mapped_column(ForeignKey("mobile_devices.id"), nullable=True, index=True)
+    item_type: Mapped[str] = mapped_column(String(100), index=True)
+    operation: Mapped[str] = mapped_column(String(80), default="upsert")
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(40), default="pending")
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    conflict_strategy: Mapped[str] = mapped_column(String(80), default="desktop_wins")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class AttendanceRecord(Base):
+    __tablename__ = "attendance_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_id: Mapped[int | None] = mapped_column(ForeignKey("college_profiles.id"), nullable=True, index=True)
+    source: Mapped[str] = mapped_column(String(120), default="college")
+    subject: Mapped[str] = mapped_column(String(160), default="Overall")
+    attended_classes: Mapped[int] = mapped_column(Integer, default=0)
+    total_classes: Mapped[int] = mapped_column(Integer, default=0)
+    percentage: Mapped[float] = mapped_column(Float, default=0)
+    target_percentage: Mapped[float] = mapped_column(Float, default=75)
+    trend: Mapped[str] = mapped_column(String(40), default="stable")
+    status: Mapped[str] = mapped_column(String(40), default="ok")
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class InternalMark(Base):
+    __tablename__ = "internal_marks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_id: Mapped[int | None] = mapped_column(ForeignKey("college_profiles.id"), nullable=True, index=True)
+    source: Mapped[str] = mapped_column(String(120), default="college")
+    subject: Mapped[str] = mapped_column(String(160))
+    component: Mapped[str] = mapped_column(String(120), default="internal")
+    marks_obtained: Mapped[float] = mapped_column(Float, default=0)
+    max_marks: Mapped[float] = mapped_column(Float, default=0)
+    status: Mapped[str] = mapped_column(String(40), default="current")
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ResultRecord(Base):
+    __tablename__ = "results"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_id: Mapped[int | None] = mapped_column(ForeignKey("college_profiles.id"), nullable=True, index=True)
+    source: Mapped[str] = mapped_column(String(120), default="college")
+    exam_name: Mapped[str] = mapped_column(String(200))
+    result_type: Mapped[str] = mapped_column(String(80), default="exam")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    score: Mapped[str] = mapped_column(String(120), default="")
+    rank: Mapped[str] = mapped_column(String(120), default="")
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(40), default="available")
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AssignmentRecord(Base):
+    __tablename__ = "assignments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_id: Mapped[int | None] = mapped_column(ForeignKey("college_profiles.id"), nullable=True, index=True)
+    source: Mapped[str] = mapped_column(String(120), default="college")
+    title: Mapped[str] = mapped_column(String(220))
+    subject: Mapped[str] = mapped_column(String(160), default="")
+    due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String(40), default="pending")
+    detail_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class FeeRecord(Base):
+    __tablename__ = "fees"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_id: Mapped[int | None] = mapped_column(ForeignKey("college_profiles.id"), nullable=True, index=True)
+    source: Mapped[str] = mapped_column(String(120), default="college")
+    fee_type: Mapped[str] = mapped_column(String(120), default="college_fee")
+    amount: Mapped[float] = mapped_column(Float, default=0)
+    currency: Mapped[str] = mapped_column(String(20), default="INR")
+    due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    receipt_path: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(40), default="pending")
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class TimetableRecord(Base):
+    __tablename__ = "timetables"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_id: Mapped[int | None] = mapped_column(ForeignKey("college_profiles.id"), nullable=True, index=True)
+    source: Mapped[str] = mapped_column(String(120), default="college")
+    schedule_type: Mapped[str] = mapped_column(String(80), default="class")
+    title: Mapped[str] = mapped_column(String(220))
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    location: Mapped[str] = mapped_column(String(220), default="")
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AnnouncementRecord(Base):
+    __tablename__ = "announcements"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_id: Mapped[int | None] = mapped_column(ForeignKey("college_profiles.id"), nullable=True, index=True)
+    source: Mapped[str] = mapped_column(String(120), default="college")
+    announcement_type: Mapped[str] = mapped_column(String(80), default="general")
+    title: Mapped[str] = mapped_column(String(220))
+    message: Mapped[str] = mapped_column(Text, default="")
+    url: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(40), default="new")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class KCETRecord(Base):
+    __tablename__ = "kcet_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_id: Mapped[int | None] = mapped_column(ForeignKey("college_profiles.id"), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(80), default="result")
+    title: Mapped[str] = mapped_column(String(220))
+    rank: Mapped[str] = mapped_column(String(120), default="")
+    score: Mapped[str] = mapped_column(String(120), default="")
+    screenshot_path: Mapped[str] = mapped_column(Text, default="")
+    pdf_path: Mapped[str] = mapped_column(Text, default="")
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(40), default="available")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

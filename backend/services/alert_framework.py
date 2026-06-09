@@ -294,6 +294,14 @@ class AlertService:
             alerts_logger.exception("Sound playback failed notification_id=%s sound=%s", notification_id, sound_path)
 
     def _speak(self, text: str, notification_id: int) -> None:
+        try:
+            from backend.services.voice_assistant import voice_assistant_service
+
+            voice_assistant_service.speak(text)
+            alerts_logger.info("Voice Played notification_id=%s text=%s", notification_id, text)
+            return
+        except Exception:
+            alerts_logger.debug("Personality voice service unavailable; using direct TTS", exc_info=True)
         script = (
             "Add-Type -AssemblyName System.Speech; "
             "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "

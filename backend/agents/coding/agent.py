@@ -18,3 +18,6 @@ class CodingAgent:
 
     def snapshot(self) -> dict:
         return self.analytics.snapshot()
+
+    def record_activity(self, payload: dict) -> dict:
+        return self.analytics.record_activity(payload)

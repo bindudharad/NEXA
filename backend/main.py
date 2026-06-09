@@ -21,6 +21,7 @@ from backend.services.website_monitor import website_monitoring_service
 @asynccontextmanager
 async def app_lifespan(_: FastAPI) -> AsyncIterator[None]:
     voice_assistant_service.mark_starting()
+    evolution_service.recovery_startup_check()
     resource_manager_service.start()
     power_monitor_service.start()
     gpu_monitor_service.start()
@@ -32,6 +33,7 @@ async def app_lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        evolution_service.recovery_clean_shutdown()
         voice_assistant_service.stop()
         download_monitoring_service.stop()
         website_monitoring_service.stop()
@@ -49,6 +51,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5175", "http://127.0.0.1:5175", "http://localhost:4173", "http://127.0.0.1:4173"],
+        allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

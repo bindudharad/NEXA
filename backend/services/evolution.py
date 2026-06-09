@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import base64
+import hmac
 import json
 import logging
 import mimetypes
+import re
+import secrets
 import shutil
 import subprocess
 from datetime import date, datetime, timedelta
@@ -22,14 +26,28 @@ from backend.database.models import (
     AchievementHistory,
     ActivityHistory,
     ActivityLog,
+    APIHealth,
     ApprovalStatus,
+    AutomationHealth,
+    AutomationHistory,
     BriefingAnalytics,
     BriefingHistory,
     BriefingRecommendation,
     BriefingSchedule,
     CodingSession,
+    AnnouncementRecord,
+    AssignmentRecord,
+    AttendanceRecord,
+    CollegeProfile,
     CollegeUpdate,
     CopilotSuggestion,
+    ContextSnapshot,
+    CopilotAction,
+    CopilotAnalytics,
+    CopilotHistory,
+    CopilotInsight,
+    CopilotWarning,
+    CrashReport,
     DailyBriefing,
     CleanupSuggestion,
     DocumentSummary,
@@ -46,21 +64,43 @@ from backend.database.models import (
     FocusAnalytics,
     FocusGoal,
     FocusHistory,
+    FeeRecord,
     Goal,
+    GoalAnalytics,
+    GoalHistory,
+    GoalProgress,
+    GoalReminder,
+    HealthMetric,
+    HealthScore,
+    InternalMark,
+    DeviceToken,
     Notification,
+    NotificationQueue,
+    ErrorLog,
+    IncidentReport,
+    KCETRecord,
     GitHistory,
     ProjectBackup,
     Project,
     ProjectEvent,
     ProjectHealth,
     ProjectSnapshot,
+    RecoveredApplication,
+    RecoveryEvent,
+    RecoveryHistory,
     RecoveryPoint,
+    RecoverySession,
     ProductivityScore,
+    OptimizationEvent,
     OCRResult,
     ScreenshotAction,
     ScreenshotHistory,
     Setting,
+    Streak,
+    ResourceUsage,
     StorageReport,
+    ResultRecord,
+    TimetableRecord,
     ExamSchedule,
     RevisionPlan,
     StudyAchievement,
@@ -79,8 +119,16 @@ from backend.database.models import (
     TimelineSummary,
     MemoryCategory,
     MemorySearch,
+    MobileAuditLog,
+    MobileDevice,
+    MobilePermission,
+    MobileSession,
+    PairingCode,
     WebsiteProfile,
+    WebsiteSession,
+    SyncQueue,
 )
+from backend.core.config import get_settings
 from backend.database.session import SessionLocal
 from backend.services.power_monitor import power_monitor_service
 from backend.services.resource_manager import resource_manager_service
@@ -165,6 +213,7 @@ class EvolutionService:
     def overview(self, db: Session) -> dict:
         return {
             "copilot": self.list_copilot_suggestions(db, limit=8),
+            "copilot_dashboard": self.copilot_dashboard(db),
             "briefing": self.latest_briefing(db),
             "briefing_settings": self.get_briefing_settings(db),
             "focus": self.active_focus(db),
@@ -177,116 +226,15 @@ class EvolutionService:
         }
 
     def generate_copilot_suggestions(self, db: Session) -> list[dict]:
-        power = power_monitor_service.get_status()
-        resource = resource_manager_service.get_status()
-        suggestions: list[dict] = []
-        battery = power.get("battery_percent")
-        charging = power.get("is_charging")
-        if isinstance(battery, int) and battery <= 20 and not charging:
-            suggestions.append(
-                self._create_suggestion(
-                    db,
-                    "battery",
-                    "Battery needs attention",
-                    f"Battery is {battery}% and the charger is disconnected.",
-                    "high",
-                    {"type": "open", "target": "battery"},
-                )
-            )
-        if resource.get("mode") in {"thermal_protection", "load_shedding"}:
-            suggestions.append(
-                self._create_suggestion(
-                    db,
-                    "resource",
-                    "Reduce background work",
-                    "Nexa detected thermal or load pressure and recommends delaying non-critical automations.",
-                    "medium",
-                    {"type": "open", "target": "resources"},
-                )
-            )
-        latest_error = (
-            db.query(TimelineEvent)
-            .filter((TimelineEvent.title.ilike("%error%")) | (TimelineEvent.description.ilike("%error%")) | (TimelineEvent.event_type == "coding_error"))
-            .order_by(TimelineEvent.created_at.desc())
-            .first()
-        )
-        if latest_error:
-            suggestions.append(
-                self._create_suggestion(
-                    db,
-                    "coding_error",
-                    "Coding issue detected",
-                    f"{latest_error.title}: open Copilot to review the captured error context.",
-                    "medium",
-                    {"type": "open", "target": "coding", "timeline_event_id": latest_error.id},
-                )
-            )
-        active_focus = db.query(FocusSession).filter(FocusSession.status == "active").one_or_none()
-        if not active_focus:
-            recent_coding = db.query(ActivityLog).filter(ActivityLog.activity_type.ilike("%coding%")).order_by(ActivityLog.created_at.desc()).first()
-            if recent_coding:
-                suggestions.append(
-                    self._create_suggestion(
-                        db,
-                        "focus",
-                        "Start focus mode",
-                        "Coding activity was detected. Focus mode can mute distractions and track this session.",
-                        "low",
-                        {"type": "start_focus"},
-                )
-            )
-        study_event = db.query(TimelineEvent).filter(TimelineEvent.event_type == "study").order_by(TimelineEvent.created_at.desc()).first()
-        if study_event and not active_focus:
-            suggestions.append(
-                self._create_suggestion(
-                    db,
-                    "study",
-                    "Continue study plan",
-                    "Recent study activity was found. Nexa can start focus mode or update syllabus progress.",
-                    "low",
-                    {"type": "open", "target": "study"},
-                )
-            )
-        due_tasks = db.query(Task).filter(Task.status.in_(["created", "pending_confirmation", "running"])).order_by(Task.created_at.desc()).limit(3).all()
-        if due_tasks:
-            suggestions.append(
-                self._create_suggestion(
-                    db,
-                    "tasks",
-                    "Review active tasks",
-                    f"{len(due_tasks)} active Nexa task(s) need attention.",
-                    "medium",
-                    {"type": "open", "target": "tasks"},
-                )
-            )
-        tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        deadline_tasks = [
-            task for task in db.query(Task).filter(Task.status != TaskStatus.completed.value).order_by(Task.created_at.desc()).limit(100).all()
-            if tomorrow in (task.plan_json or "") or "tomorrow" in task.command.lower() or "assignment" in task.command.lower()
-        ][:3]
-        if deadline_tasks:
-            suggestions.append(
-                self._create_suggestion(
-                    db,
-                    "deadline",
-                    "Deadline needs attention",
-                    f"{len(deadline_tasks)} task(s) look deadline-sensitive. Review assignments and reminders.",
-                    "high",
-                    {"type": "open", "target": "tasks", "task_ids": [task.id for task in deadline_tasks]},
-                )
-            )
-        monitored_profiles = db.query(WebsiteProfile).filter(WebsiteProfile.monitoring_enabled.is_(True)).count()
-        if monitored_profiles:
-            suggestions.append(
-                self._create_suggestion(
-                    db,
-                    "website_monitoring",
-                    "Website monitoring active",
-                    f"{monitored_profiles} Website Vault monitor(s) are active.",
-                    "low",
-                    {"type": "open", "target": "websites"},
-                )
-            )
+        settings = self.get_copilot_settings(db)
+        if not settings["enabled"]:
+            return []
+        snapshot = self.create_context_snapshot(db)
+        context = snapshot["payload"]
+        candidates = self._copilot_candidates(db, context, settings)
+        suggestions = [self._create_suggestion(db, item["type"], item["title"], item["message"], item["severity"], item["action"], item.get("module", "copilot_engine"), item.get("metadata", {})) for item in candidates]
+        self._record_copilot_insights(db, context)
+        self._record_copilot_analytics(db, len(suggestions))
         db.commit()
         for item in suggestions:
             if item["severity"] in {"high", "critical"}:
@@ -304,6 +252,54 @@ class EvolutionService:
                 )
         return suggestions
 
+    def create_context_snapshot(self, db: Session) -> dict:
+        context = self._copilot_context(db)
+        latest_activity = context["activity"]["latest"]
+        row = ContextSnapshot(
+            current_app=latest_activity.get("app_name", ""),
+            current_window=latest_activity.get("window_title", ""),
+            activity_type=context["activity"]["type"],
+            priority_context=context["priority_context"],
+            payload_json=json.dumps(context, default=str),
+            privacy_mode=self.get_copilot_settings(db)["privacy_mode"],
+        )
+        db.add(row)
+        db.flush()
+        return self._context_snapshot_dict(row)
+
+    def copilot_dashboard(self, db: Session) -> dict:
+        latest_snapshot = db.query(ContextSnapshot).order_by(ContextSnapshot.created_at.desc()).first()
+        if not latest_snapshot:
+            latest_snapshot = ContextSnapshot(activity_type="idle", payload_json=json.dumps(self._copilot_context(db), default=str))
+            db.add(latest_snapshot)
+            db.flush()
+        suggestions = self.list_copilot_suggestions(db, 100)
+        open_suggestions = [item for item in suggestions if item["status"] == "open"]
+        warnings = [self._copilot_warning_dict(row) for row in db.query(CopilotWarning).order_by(CopilotWarning.created_at.desc()).limit(50).all()]
+        insights = [self._copilot_insight_dict(row) for row in db.query(CopilotInsight).order_by(CopilotInsight.created_at.desc()).limit(20).all()]
+        actions = [self._copilot_action_dict(row) for row in db.query(CopilotAction).order_by(CopilotAction.created_at.desc()).limit(50).all()]
+        history = [self._copilot_history_dict(row) for row in db.query(CopilotHistory).order_by(CopilotHistory.created_at.desc()).limit(50).all()]
+        analytics = [self._copilot_analytics_dict(row) for row in db.query(CopilotAnalytics).order_by(CopilotAnalytics.created_at.desc()).limit(14).all()]
+        severity_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+        top = sorted(open_suggestions, key=lambda item: severity_rank.get(item["severity"], 0), reverse=True)[:5]
+        return {
+            "context": self._context_snapshot_dict(latest_snapshot),
+            "suggestions": open_suggestions,
+            "warnings": warnings,
+            "insights": insights,
+            "quick_actions": self._copilot_quick_actions(open_suggestions),
+            "actions": actions,
+            "history": history,
+            "analytics": analytics,
+            "top_recommendations": top,
+            "system_status": self._copilot_system_status(open_suggestions, warnings),
+            "activity_summary": _loads(latest_snapshot.payload_json, {}).get("activity", {}),
+            "orbital": {"glow": bool(top), "suggestion_count": len(open_suggestions), "critical_count": sum(1 for item in open_suggestions if item["severity"] == "critical")},
+            "voice": {"commands": ["what should I do next", "any important updates", "show recommendations"]},
+            "privacy": self.get_copilot_settings(db),
+            "offline_ready": True,
+        }
+
     def list_copilot_suggestions(self, db: Session, limit: int = 50) -> list[dict]:
         rows = db.query(CopilotSuggestion).order_by(CopilotSuggestion.created_at.desc()).limit(limit).all()
         return [self._suggestion_dict(row) for row in rows]
@@ -314,9 +310,64 @@ class EvolutionService:
             raise ValueError("Suggestion not found")
         row.status = status
         row.acted_at = datetime.utcnow()
+        db.add(CopilotHistory(event_type=f"suggestion_{status}", suggestion_id=row.id, title=row.title, detail_json=json.dumps({"status": status, "suggestion_type": row.suggestion_type}), status=status))
         db.commit()
         db.refresh(row)
         return self._suggestion_dict(row)
+
+    def execute_copilot_action(self, db: Session, suggestion_id: int, action_type: str) -> dict:
+        suggestion = db.get(CopilotSuggestion, suggestion_id)
+        if not suggestion:
+            raise ValueError("Suggestion not found")
+        action = _loads(suggestion.action_json, {})
+        result: dict = {"status": "recorded", "action": action}
+        if action_type == "dismiss":
+            suggestion.status = "dismissed"
+            suggestion.acted_at = datetime.utcnow()
+            result = {"status": "dismissed"}
+        elif action_type == "save":
+            suggestion.status = "saved"
+            suggestion.acted_at = datetime.utcnow()
+            result = {"status": "saved"}
+        elif action_type == "act":
+            target = action.get("target", action.get("type", "dashboard"))
+            if target == "resources":
+                result = self.optimize_self_health(db, "optimize")
+            elif action.get("type") == "start_focus" or target == "focus":
+                result = self.start_focus(db, "Copilot Focus Session", 25, 5, "focus")
+            elif target == "battery":
+                result = {"status": "open_panel", "target": "battery"}
+            elif target == "project_backup" and action.get("project_path"):
+                result = self.project_guardian_snapshot(db, action["project_path"], "copilot_recommendation")
+            else:
+                result = {"status": "open_panel", "target": target}
+            suggestion.status = "acted"
+            suggestion.acted_at = datetime.utcnow()
+        row = CopilotAction(suggestion_id=suggestion.id, action_type=action_type, title=suggestion.title, payload_json=json.dumps(action, default=str), status=result.get("status", "completed"), result_json=json.dumps(result, default=str), executed_at=datetime.utcnow())
+        db.add(row)
+        db.add(CopilotHistory(event_type="action_executed", suggestion_id=suggestion.id, title=suggestion.title, detail_json=json.dumps({"action_type": action_type, "result": result}, default=str), status=result.get("status", "completed")))
+        self.add_timeline_event(db, "copilot", "Copilot action executed", suggestion.title, "copilot_engine", metadata={"suggestion_id": suggestion.id, "action_type": action_type}, commit=False)
+        db.commit()
+        return {"suggestion": self._suggestion_dict(suggestion), "action": self._copilot_action_dict(row), "result": result}
+
+    def get_copilot_settings(self, db: Session) -> dict:
+        defaults = {"enabled": True, "notifications_enabled": True, "voice_enabled": True, "privacy_mode": "local", "modules": {"coding": True, "study": True, "college": True, "battery": True, "health": True, "project": True, "goals": True}, "quiet_minutes": 30, "learning_enabled": True}
+        row = db.query(Setting).filter(Setting.key == "evolution.copilot_settings").one_or_none()
+        return {**defaults, **_loads(row.value, {})} if row else defaults
+
+    def update_copilot_settings(self, db: Session, updates: dict) -> dict:
+        current = self.get_copilot_settings(db)
+        if isinstance(updates.get("modules"), dict):
+            current["modules"] = {**current["modules"], **updates.pop("modules")}
+        current.update({key: value for key, value in updates.items() if value is not None})
+        row = db.query(Setting).filter(Setting.key == "evolution.copilot_settings").one_or_none()
+        if row:
+            row.value = json.dumps(current, default=str)
+            row.updated_at = datetime.utcnow()
+        else:
+            db.add(Setting(key="evolution.copilot_settings", value=json.dumps(current, default=str)))
+        db.commit()
+        return current
 
     def get_briefing_settings(self, db: Session) -> dict:
         defaults = {
@@ -393,11 +444,13 @@ class EvolutionService:
         insights = self._briefing_insights(db, context)
         summary = self._briefing_summary(context, sections, recommendations)
         voice_text = self._voice_briefing_text(context, recommendations)
+        voice_text = voice_assistant_service.personality_response("daily_briefing", voice_text, context)
         payload = {
             "current_time": datetime.now().strftime("%I:%M %p"),
             "sections": sections,
             "recommendations": recommendations,
             "insights": insights,
+            "voice_text": voice_text,
             "delivery_methods": settings["delivery_methods"],
             **context,
         }
@@ -1310,6 +1363,204 @@ class EvolutionService:
         health = [self._project_health_dict(row) for row in db.query(ProjectHealth).order_by(ProjectHealth.created_at.desc()).limit(30).all()]
         return {"projects": projects, "backups": backups, "snapshots": snapshots, "recovery_points": recovery_points, "git_history": git_history, "events": events, "health": health, "offline_ready": True}
 
+    def recovery_dashboard(self, db: Session) -> dict:
+        reports = [self._crash_report_dict(row) for row in db.query(CrashReport).order_by(CrashReport.created_at.desc()).limit(30).all()]
+        sessions = [self._recovery_session_dict(row) for row in db.query(RecoverySession).order_by(RecoverySession.started_at.desc()).limit(30).all()]
+        incidents = [self._incident_report_dict(row) for row in db.query(IncidentReport).order_by(IncidentReport.created_at.desc()).limit(30).all()]
+        events = [self._recovery_event_dict(row) for row in db.query(RecoveryEvent).order_by(RecoveryEvent.created_at.desc()).limit(50).all()]
+        apps = [self._recovered_application_dict(row) for row in db.query(RecoveredApplication).order_by(RecoveredApplication.created_at.desc()).limit(50).all()]
+        history = [self._recovery_history_dict(row) for row in db.query(RecoveryHistory).order_by(RecoveryHistory.created_at.desc()).limit(50).all()]
+        guardian = self.project_guardian_dashboard(db)
+        open_reports = sum(1 for row in reports if row["status"] == "open")
+        recovered = sum(1 for row in sessions if row["status"] == "restored")
+        score = max(0, min(100, 100 - open_reports * 12 + min(len(guardian["recovery_points"]), 5) * 3))
+        return {
+            "summary": {
+                "crash_reports": len(reports),
+                "open_reports": open_reports,
+                "recovery_sessions": len(sessions),
+                "restored_sessions": recovered,
+                "incident_reports": len(incidents),
+                "available_app_restores": sum(1 for row in apps if row["status"] == "available"),
+                "recovery_points": len(guardian["recovery_points"]),
+                "health_score": round(score, 1),
+            },
+            "crash_reports": reports,
+            "recovery_sessions": sessions,
+            "incident_reports": incidents,
+            "events": events,
+            "recovered_applications": apps,
+            "history": history,
+            "project_guardian": {
+                "recovery_points": guardian["recovery_points"][:10],
+                "backups": guardian["backups"][:10],
+                "health": guardian["health"][:10],
+            },
+            "recommendations": self.recovery_recommendations(db),
+            "capabilities": {
+                "crash_detection": True,
+                "vscode_recovery": True,
+                "cursor_recovery": True,
+                "terminal_recovery": True,
+                "power_loss_recovery": True,
+                "bsod_detection": True,
+                "session_restore": True,
+                "offline_ready": True,
+            },
+            "offline_ready": True,
+        }
+
+    def record_crash_report(
+        self,
+        db: Session,
+        crash_type: str,
+        source: str = "emergency_recovery",
+        application: str = "",
+        message: str = "",
+        severity: str = "high",
+        stack_trace: str = "",
+        diagnostics: dict | None = None,
+        project_path: str | None = None,
+    ) -> dict:
+        diagnostics = diagnostics or {}
+        application = application or self._application_from_crash_type(crash_type)
+        title = f"{application or 'System'} recovery report"
+        report = CrashReport(crash_type=crash_type, source=source, application=application, severity=severity, message=message or f"{crash_type.replace('_', ' ').title()} detected.", stack_trace=stack_trace, diagnostics_json=json.dumps(diagnostics, default=str))
+        db.add(report)
+        db.flush()
+        session = self._capture_recovery_session_row(db, crash_type, [{"name": application, "process": diagnostics.get("process_name", ""), "workspace_path": project_path or diagnostics.get("workspace_path", "")}], project_path, commit=False)
+        actions = ["Saved crash diagnostics", "Captured recovery session", "Prepared restore plan"]
+        if project_path:
+            try:
+                snapshot = self.project_guardian_snapshot(db, project_path, f"{crash_type}_recovery")
+                actions.append("Created Project Guardian recovery snapshot")
+                diagnostics["project_guardian_snapshot"] = snapshot
+                report.diagnostics_json = json.dumps(diagnostics, default=str)
+            except Exception as exc:
+                diagnostics["project_guardian_error"] = str(exc)
+                report.diagnostics_json = json.dumps(diagnostics, default=str)
+        incident = IncidentReport(
+            incident_type=crash_type,
+            title=title,
+            summary=report.message,
+            applications_affected_json=json.dumps([application] if application else [], default=str),
+            recovery_actions_json=json.dumps(actions, default=str),
+            recovered_items_json=json.dumps(_loads(session.restore_plan_json, []), default=str),
+            recommendations_json=json.dumps(self._recovery_recommendations_for(crash_type, application), default=str),
+        )
+        db.add(incident)
+        self._record_recovery_event(db, crash_type, "Crash detected", report.message, severity, {"report_id": report.id, "application": application, "session_id": session.id})
+        db.commit()
+        db.refresh(report)
+        db.refresh(session)
+        db.refresh(incident)
+        self._write_recovery_log("crash.log", f"{crash_type} {application}: {report.message}")
+        self._write_recovery_log("recovery.log", f"Captured session {session.id} for report {report.id}")
+        self.add_timeline_event(db, "recovery", "Crash recovery report created", report.message, "emergency_recovery", metadata={"report_id": report.id, "session_id": session.id, "important": True})
+        NotificationAgent(db).notify(
+            "Nexa Emergency Recovery",
+            report.message,
+            alert_type="emergency_recovery",
+            module="emergency_recovery",
+            severity=severity,
+            priority="high",
+            category="warning",
+            suggested_action="Open Emergency Recovery to review restore options.",
+            action_buttons=["Open Recovery", "View Report", "Dismiss"],
+            metadata={"report_id": report.id, "session_id": session.id, "application": application},
+        )
+        return {"crash_report": self._crash_report_dict(report), "session": self._recovery_session_dict(session), "incident_report": self._incident_report_dict(incident)}
+
+    def capture_recovery_session(self, db: Session, session_type: str = "workspace", applications: list[dict] | None = None, project_path: str | None = None) -> dict:
+        row = self._capture_recovery_session_row(db, session_type, applications or [], project_path)
+        self._record_recovery_event(db, "session_captured", "Recovery session captured", f"Captured {session_type} recovery state.", "medium", {"session_id": row.id})
+        db.commit()
+        db.refresh(row)
+        self._write_recovery_log("recovery.log", f"Captured recovery session {row.id} ({session_type})")
+        return self._recovery_session_dict(row)
+
+    def restore_recovery_session(self, db: Session, session_id: int) -> dict:
+        row = db.get(RecoverySession, session_id)
+        if not row:
+            raise ValueError("Recovery session not found")
+        restore_plan = _loads(row.restore_plan_json, [])
+        row.status = "restored"
+        row.ended_at = datetime.utcnow()
+        row.restored_items_json = json.dumps(restore_plan, default=str)
+        apps = db.query(RecoveredApplication).filter(RecoveredApplication.session_id == row.id).all()
+        for app in apps:
+            app.status = "restored"
+        self._record_recovery_event(db, "session_restored", "Session restored", f"Prepared restore plan for {len(restore_plan)} item(s).", "low", {"session_id": row.id})
+        db.add(RecoveryHistory(event_type="session_restored", title="Session restored", message=f"Recovery session {row.id} marked restored.", status="completed", metadata_json=json.dumps({"session_id": row.id, "restore_plan": restore_plan}, default=str)))
+        db.commit()
+        db.refresh(row)
+        self._write_recovery_log("recovery.log", f"Restored recovery session {row.id}")
+        self.add_timeline_event(db, "recovery", "Session restored", f"Recovery session {row.id} restored.", "emergency_recovery", metadata={"session_id": row.id, "important": True})
+        NotificationAgent(db).notify(
+            "Nexa Emergency Recovery",
+            "Recovery session restored. Review the restore plan before reopening sensitive work.",
+            alert_type="emergency_recovery",
+            module="emergency_recovery",
+            severity="low",
+            priority="medium",
+            category="success",
+            suggested_action="Review recovered applications and reopen required work.",
+            action_buttons=["Open Recovery", "Dismiss"],
+            metadata={"session_id": row.id},
+        )
+        return self._recovery_session_dict(row)
+
+    def simulate_recovery_event(self, db: Session, event_type: str, application: str = "VS Code", project_path: str | None = None) -> dict:
+        diagnostics = {
+            "simulated": True,
+            "process_name": self._process_for_application(application),
+            "workspace_path": project_path or str(Path.cwd()),
+            "open_files": [],
+            "terminal": {"cwd": project_path or str(Path.cwd()), "recent_commands": []},
+        }
+        return self.record_crash_report(db, event_type, "simulation", application, f"{application} {event_type.replace('_', ' ')} simulated for recovery validation.", "high", diagnostics=diagnostics, project_path=project_path)
+
+    def recovery_recommendations(self, db: Session) -> list[dict]:
+        open_reports = db.query(CrashReport).filter(CrashReport.status == "open").count()
+        sessions = db.query(RecoverySession).filter(RecoverySession.status == "captured").count()
+        recovery_points = db.query(RecoveryPoint).filter(RecoveryPoint.status == "available").count()
+        recommendations = []
+        if open_reports:
+            recommendations.append({"priority": "high", "title": "Review crash reports", "message": f"{open_reports} open crash report(s) need review.", "action": "open_recovery_dashboard"})
+        if sessions:
+            recommendations.append({"priority": "medium", "title": "Restore captured sessions", "message": f"{sessions} captured recovery session(s) are available.", "action": "restore_session"})
+        if recovery_points == 0:
+            recommendations.append({"priority": "medium", "title": "Create project recovery points", "message": "No Project Guardian recovery point is available yet.", "action": "create_snapshot"})
+        if not recommendations:
+            recommendations.append({"priority": "low", "title": "Recovery readiness healthy", "message": "No open incidents detected. Recovery services are ready offline.", "action": "none"})
+        return recommendations
+
+    def recovery_startup_check(self) -> dict:
+        with self.db_factory() as db:
+            clean = self._setting_value(db, "emergency_recovery.clean_shutdown", "true")
+            last_seen = self._setting_value(db, "emergency_recovery.last_seen", "")
+            recorded = None
+            if clean == "false":
+                recorded = self.record_crash_report(
+                    db,
+                    "unexpected_shutdown",
+                    source="startup_heartbeat",
+                    application="Nexa",
+                    message="Nexa detected an unclean previous shutdown. Recovery information is available.",
+                    severity="high",
+                    diagnostics={"last_seen": last_seen, "detected_at": datetime.utcnow().isoformat()},
+                )
+            self._set_setting_value(db, "emergency_recovery.clean_shutdown", "false")
+            self._set_setting_value(db, "emergency_recovery.last_seen", datetime.utcnow().isoformat())
+            db.commit()
+            return {"startup_checked": True, "unclean_shutdown_detected": recorded is not None, "recorded": recorded}
+
+    def recovery_clean_shutdown(self) -> None:
+        with self.db_factory() as db:
+            self._set_setting_value(db, "emergency_recovery.clean_shutdown", "true")
+            self._set_setting_value(db, "emergency_recovery.last_seen", datetime.utcnow().isoformat())
+            db.commit()
+
     def scan_downloads(self, db: Session, folder: str | None = None, large_file_mb: int = 500) -> dict:
         root = self._downloads_root(folder)
         large_threshold = max(1, large_file_mb) * 1024 * 1024
@@ -1608,32 +1859,61 @@ class EvolutionService:
 
     def build_automation(self, db: Session, prompt: str) -> dict:
         text = prompt.lower()
-        condition: dict = {"event_type": "manual"}
+        trigger: dict = {"event_type": "manual"}
+        conditions: list[dict] = []
         action: dict = {"type": "notify", "message": prompt, "voice_enabled": False}
+        schedule: dict = {}
         name = "Natural Language Automation"
-        requires_approval = any(term in text for term in ("shutdown", "restart", "delete", "move", "registry", "credential", "browser"))
+        priority = "medium"
+        requires_approval = any(term in text for term in ("shutdown", "restart", "delete", "move", "registry", "credential", "browser", "script", "execute"))
         if "battery" in text:
-            threshold = 20
-            for token in text.replace("%", " ").split():
-                if token.isdigit():
-                    threshold = int(token)
-                    break
-            condition = {"metric": "battery", "operator": "<=", "value": threshold}
+            threshold = self._extract_number(text, 20)
+            trigger = {"metric": "battery", "operator": "<=", "value": threshold}
             name = f"Battery below {threshold}%"
             action = {"type": "notify", "message": f"Battery reached {threshold}%. Please connect your charger.", "voice_enabled": "voice" in text}
+            if "not charging" in text or "charger is not connected" in text or "charger disconnected" in text:
+                conditions.append({"metric": "charging", "operator": "==", "value": False})
         if "charger" in text and ("disconnect" in text or "disconnected" in text):
-            condition = {"event_type": "charger_disconnected"}
+            trigger = {"event_type": "charger_disconnected"}
             name = "Charger disconnected"
             action = {"type": "notify", "message": "Charger disconnected. Laptop is running on battery power.", "voice_enabled": "voice" in text}
+        if "codex" in text and ("finish" in text or "queue" in text or "queued tasks" in text):
+            trigger = {"event_type": "codex_queue_completed"}
+            delay = self._extract_minutes(text, 5) * 60
+            name = "Codex queue completed"
+            action = {"type": "shutdown" if "shutdown" in text else "notify", "message": "Codex queued tasks completed.", "delay_seconds": delay, "requires_approval": "shutdown" in text}
+            schedule = {"delay_seconds": delay}
         if "remind" in text or "reminder" in text:
-            condition = {"event_type": "reminder_due"}
+            trigger = {"event_type": "reminder_due"}
             name = "Reminder automation"
             action = {"type": "notify", "message": prompt, "voice_enabled": "voice" in text}
-        if "website" in text or "available" in text:
-            condition = {"event_type": "website_available"}
+        if "kcet" in text:
+            trigger = {"event_type": "kcet_available"}
+            interval = self._extract_minutes(text, 30)
+            schedule = {"repeat_every_seconds": interval * 60}
+            name = "KCET monitoring automation"
+            action = {"type": "notify", "message": "KCET results or updates are available.", "voice_enabled": "voice" in text}
+        elif "website" in text or "available" in text:
+            trigger = {"event_type": "website_available"}
             name = "Website availability automation"
             action = {"type": "notify", "message": "Monitored website is available.", "voice_enabled": "voice" in text}
-        automation = AutomationEngine(db).create(name, condition, action)
+        if "contineo" in text and ("morning" in text or "every morning" in text or "open" in text):
+            trigger = {"event_type": "time_daily"}
+            schedule = {"time": "08:00", "repeat": "daily"}
+            name = "Open Contineo every morning"
+            action = {"type": "browser_automation", "message": "Open Contineo portal.", "target": "contineo", "requires_approval": True}
+            requires_approval = True
+        if "backup" in text and "project" in text:
+            trigger = {"event_type": "before_restart" if "restart" in text else "project_backup_requested"}
+            name = "Project backup automation"
+            action = {"type": "backup_folder", "message": "Backup project before risky operation.", "source": str(Path.cwd())}
+        repeat_minutes = self._extract_minutes(text, 0)
+        if repeat_minutes and ("every" in text or "repeat" in text):
+            schedule["repeat_every_seconds"] = repeat_minutes * 60
+        full_condition = {"all": [trigger, *conditions]} if conditions else trigger
+        action["requires_approval"] = bool(requires_approval or action.get("requires_approval"))
+        approval_rules = {"required": action["requires_approval"], "high_risk_actions": sorted(AutomationEngine.high_risk_actions)}
+        automation = AutomationEngine(db).create(name, full_condition, action, description=prompt, schedule=schedule, priority=priority, owner="user", approval_rules=approval_rules)
         approval = None
         if requires_approval:
             notification = NotificationAgent(db).notify(
@@ -1650,27 +1930,135 @@ class EvolutionService:
             )
             approval = {"required": True, "notification_id": notification.get("id")}
         self.add_timeline_event(db, "automation", "Automation created", prompt, "automation_builder")
-        return {"prompt": prompt, "automation": automation, "trigger": condition, "action": action, "approval": approval or {"required": False}}
+        return {"prompt": prompt, "automation": automation, "trigger": trigger, "conditions": conditions, "action": action, "schedule": schedule, "approval": approval or {"required": bool(action["requires_approval"])}, "offline_fallback": True}
 
-    def create_goal(self, db: Session, title: str, target_value: float, unit: str = "count", goal_type: str = "custom", period: str = "daily") -> dict:
-        row = Goal(title=title, target_value=target_value, unit=unit, goal_type=goal_type, period=period)
+    def create_goal(
+        self,
+        db: Session,
+        title: str,
+        target_value: float,
+        unit: str = "count",
+        goal_type: str = "custom",
+        period: str = "daily",
+        description: str = "",
+        deadline: str = "",
+        priority: str = "medium",
+        category: str = "",
+        reminder_settings: dict | None = None,
+    ) -> dict:
+        goal_type = (goal_type or "custom").lower()
+        row = Goal(
+            title=title,
+            description=description,
+            target_value=target_value,
+            unit=unit,
+            goal_type=goal_type,
+            category=category or goal_type,
+            priority=priority or "medium",
+            period=period or "daily",
+            deadline=deadline or "",
+            reminder_settings_json=json.dumps(reminder_settings or {}, default=str),
+        )
         db.add(row)
+        db.flush()
+        self._record_goal_event(db, row, "created", "Goal created", f"{row.title} target is {row.target_value:g} {row.unit}.", {"reminder_settings": reminder_settings or {}})
+        self.add_timeline_event(db, "goal", "Goal created", row.title, "goal_tracker", metadata={"goal_id": row.id, "goal_type": row.goal_type}, commit=False)
+        NotificationAgent(db).notify(
+            "Nexa Goal Created",
+            f"{row.title} is now being tracked.",
+            alert_type="goal_created",
+            module="goal_tracker",
+            severity="low",
+            priority="low",
+            category="info",
+            suggested_action="Open Goal Tracker to view progress.",
+            action_buttons=["Open Goals", "Dismiss"],
+            metadata={"goal_id": row.id, "goal_type": row.goal_type},
+        )
+        self._record_goal_analytics(db, row, "created")
         db.commit()
         db.refresh(row)
         return self._goal_dict(row)
 
-    def update_goal(self, db: Session, goal_id: int, current_value: float) -> dict:
+    def edit_goal(self, db: Session, goal_id: int, updates: dict) -> dict:
         row = db.get(Goal, goal_id)
         if not row:
             raise ValueError("Goal not found")
-        row.current_value = current_value
+        for key in ["title", "description", "goal_type", "category", "priority", "unit", "period", "deadline", "status"]:
+            if key in updates and updates[key] is not None:
+                setattr(row, key, updates[key])
+        if updates.get("target_value") is not None:
+            row.target_value = float(updates["target_value"])
+        if updates.get("reminder_settings") is not None:
+            row.reminder_settings_json = json.dumps(updates["reminder_settings"], default=str)
         row.updated_at = datetime.utcnow()
-        if row.current_value >= row.target_value:
-            row.status = "achieved"
-            self._unlock_achievement(db, f"Goal Achieved: {row.title}", "Goal", f"{row.title} reached {row.current_value:g} {row.unit}.", {"goal_id": row.id})
+        self._record_goal_event(db, row, "updated", "Goal updated", row.title, updates)
+        self._record_goal_analytics(db, row, "updated")
         db.commit()
         db.refresh(row)
         return self._goal_dict(row)
+
+    def update_goal(self, db: Session, goal_id: int, current_value: float, source: str = "manual", note: str = "", metadata: dict | None = None) -> dict:
+        row = db.get(Goal, goal_id)
+        if not row:
+            raise ValueError("Goal not found")
+        previous = float(row.current_value or 0)
+        row.current_value = current_value
+        row.updated_at = datetime.utcnow()
+        progress = self._goal_progress_percent(row)
+        db.add(GoalProgress(goal_id=row.id, delta_value=current_value - previous, current_value=current_value, progress_percent=progress, source=source, note=note, metadata_json=json.dumps(metadata or {}, default=str)))
+        self._record_goal_event(db, row, "progress", "Goal progress updated", f"{row.current_value:g}/{row.target_value:g} {row.unit}", {"source": source, "note": note, "previous_value": previous, **(metadata or {})})
+        self._record_goal_analytics(db, row, source)
+        self._update_goal_streak(db, row)
+        if row.current_value >= row.target_value:
+            row.status = "achieved"
+            self._unlock_achievement(db, f"Goal Achieved: {row.title}", "Goal", f"{row.title} reached {row.current_value:g} {row.unit}.", {"goal_id": row.id})
+            self._record_goal_event(db, row, "completed", "Goal completed", f"{row.title} reached the target.", {"source": source})
+            self.add_timeline_event(db, "goal", "Goal completed", row.title, "goal_tracker", metadata={"goal_id": row.id, "important": True}, commit=False)
+            NotificationAgent(db).notify(
+                "Nexa Goal Completed",
+                f"{row.title} reached {row.current_value:g} {row.unit}.",
+                alert_type="goal_completed",
+                module="goal_tracker",
+                severity="medium",
+                priority="medium",
+                category="success",
+                suggested_action="Review achievements and set the next target.",
+                action_buttons=["View Goals", "View Achievements", "Dismiss"],
+                metadata={"goal_id": row.id, "goal_type": row.goal_type},
+            )
+        else:
+            NotificationAgent(db).notify(
+                "Nexa Goal Updated",
+                f"{row.title} is {progress}% complete.",
+                alert_type="goal_updated",
+                module="goal_tracker",
+                severity="low",
+                priority="low",
+                category="info",
+                suggested_action="Continue progress toward the target.",
+                action_buttons=["Open Goals", "Dismiss"],
+                metadata={"goal_id": row.id, "progress_percent": progress},
+            )
+        db.commit()
+        db.refresh(row)
+        return self._goal_dict(row)
+
+    def increment_goal_progress(self, db: Session, goal_id: int, delta_value: float, source: str = "manual", note: str = "") -> dict:
+        row = db.get(Goal, goal_id)
+        if not row:
+            raise ValueError("Goal not found")
+        return self.update_goal(db, goal_id, max(0, float(row.current_value or 0) + float(delta_value)), source, note, {"delta_value": delta_value})
+
+    def delete_goal(self, db: Session, goal_id: int) -> dict:
+        row = db.get(Goal, goal_id)
+        if not row:
+            raise ValueError("Goal not found")
+        row.status = "deleted"
+        row.updated_at = datetime.utcnow()
+        self._record_goal_event(db, row, "deleted", "Goal deleted", row.title, {})
+        db.commit()
+        return {"id": goal_id, "deleted": True}
 
     def list_goals(self, db: Session) -> list[dict]:
         return [self._goal_dict(row) for row in db.query(Goal).order_by(Goal.created_at.desc()).all()]
@@ -1684,7 +2072,121 @@ class EvolutionService:
             by_period[row.period] = by_period.get(row.period, 0) + 1
             by_type[row.goal_type] = by_type.get(row.goal_type, 0) + 1
             achieved += 1 if row.status == "achieved" else 0
-        return {"total": len(rows), "achieved": achieved, "active": len(rows) - achieved, "by_period": by_period, "by_type": by_type}
+        average = round(sum(self._goal_progress_percent(row) for row in rows) / max(len(rows), 1), 2) if rows else 0
+        return {"total": len(rows), "achieved": achieved, "active": len([row for row in rows if row.status == "active"]), "average_progress_percent": average, "by_period": by_period, "by_type": by_type}
+
+    def goal_dashboard(self, db: Session) -> dict:
+        self.refresh_goal_auto_tracking(db)
+        rows = db.query(Goal).order_by(Goal.updated_at.desc()).all()
+        goals = [self._goal_detail_dict(db, row) for row in rows]
+        history = [self._goal_history_dict(row) for row in db.query(GoalHistory).order_by(GoalHistory.created_at.desc()).limit(30).all()]
+        streaks = [self._streak_dict(row) for row in db.query(Streak).order_by(Streak.updated_at.desc()).limit(20).all()]
+        analytics = self.goal_analytics(db)
+        reminders = [self._goal_reminder_dict(row) for row in db.query(GoalReminder).order_by(GoalReminder.due_at.asc()).limit(20).all()]
+        return {
+            "active_goals": [goal for goal in goals if goal["status"] == "active"],
+            "completed_goals": [goal for goal in goals if goal["status"] == "achieved"],
+            "failed_goals": [goal for goal in goals if goal["status"] == "failed"],
+            "goals": goals,
+            "statistics": self.goal_stats(db),
+            "streaks": streaks,
+            "achievements": self.list_achievements(db)[:20],
+            "analytics": analytics,
+            "recommendations": self.goal_recommendations(db, goals),
+            "recent_activity": history,
+            "reminders": reminders,
+            "orbital": {"button": "Goals", "quick_actions": ["Create Goal", "View Progress", "View Streaks", "View Achievements", "View Analytics"]},
+            "offline_ready": True,
+            "tracking_sources": ["coding_sessions", "study_sessions", "focus_sessions", "tasks", "timeline_events"],
+        }
+
+    def goal_history(self, db: Session, limit: int = 100) -> list[dict]:
+        return [self._goal_history_dict(row) for row in db.query(GoalHistory).order_by(GoalHistory.created_at.desc()).limit(limit).all()]
+
+    def goal_analytics(self, db: Session) -> dict:
+        rows = db.query(Goal).all()
+        total = len(rows)
+        achieved = len([row for row in rows if row.status == "achieved"])
+        progress_values = [self._goal_progress_percent(row) for row in rows]
+        most_successful = sorted([self._goal_dict(row) for row in rows], key=lambda item: item["progress_percent"], reverse=True)[:5]
+        weak_areas = [self._goal_dict(row) for row in rows if row.status == "active" and self._goal_progress_percent(row) < 50][:5]
+        today = date.today().isoformat()
+        daily_progress = [self._goal_analytics_dict(row) for row in db.query(GoalAnalytics).filter(GoalAnalytics.analytics_date == today).order_by(GoalAnalytics.created_at.desc()).limit(20).all()]
+        return {
+            "daily_progress": daily_progress,
+            "weekly_progress": self._goal_progress_since(db, 7),
+            "monthly_progress": self._goal_progress_since(db, 30),
+            "success_rate": round(achieved / max(total, 1) * 100, 2),
+            "completion_rate": round(sum(progress_values) / max(total, 1), 2) if rows else 0,
+            "average_goal_completion_time_days": self._average_goal_completion_days(db),
+            "most_successful_goals": most_successful,
+            "weak_areas": weak_areas,
+            "recommendations": self.goal_recommendations(db, [self._goal_dict(row) for row in rows]),
+        }
+
+    def goal_recommendations(self, db: Session, goals: list[dict] | None = None) -> list[dict]:
+        goals = goals if goals is not None else self.list_goals(db)
+        recommendations: list[dict] = []
+        today = date.today()
+        for goal in goals:
+            if goal["status"] != "active":
+                continue
+            remaining = max(0, goal["target_value"] - goal["current_value"])
+            if goal["progress_percent"] == 0:
+                recommendations.append({"priority": "medium", "title": "Goal not started", "message": f"{goal['title']} has not started yet.", "action": "start_goal", "goal_id": goal["id"]})
+            elif goal["progress_percent"] < 50:
+                recommendations.append({"priority": "medium", "title": "Goal behind pace", "message": f"{goal['title']} needs {remaining:g} {goal['unit']} more.", "action": "add_progress", "goal_id": goal["id"]})
+            if goal.get("deadline"):
+                try:
+                    days_left = (datetime.fromisoformat(goal["deadline"]).date() - today).days
+                    if days_left <= 1 and goal["progress_percent"] < 100:
+                        recommendations.append({"priority": "high", "title": "Goal deadline approaching", "message": f"{goal['title']} is due in {max(days_left, 0)} day(s).", "action": "prioritize_goal", "goal_id": goal["id"]})
+                except ValueError:
+                    pass
+        if not recommendations and goals:
+            recommendations.append({"priority": "low", "title": "Goals on track", "message": "Your tracked goals are progressing steadily.", "action": "continue"})
+        return recommendations[:8]
+
+    def refresh_goal_auto_tracking(self, db: Session) -> dict:
+        today_start = datetime.combine(date.today(), datetime.min.time())
+        today_end = today_start + timedelta(days=1)
+        updated: list[dict] = []
+        for goal in db.query(Goal).filter(Goal.status == "active").all():
+            value: float | None = None
+            source = "auto"
+            if goal.goal_type in {"coding", "project"}:
+                seconds = sum(row.duration_seconds for row in db.query(CodingSession).filter(CodingSession.started_at >= today_start, CodingSession.started_at < today_end).all())
+                value = seconds / 3600 if goal.unit in {"hour", "hours"} else seconds
+                source = "coding_analytics"
+            elif goal.goal_type in {"study", "reading"}:
+                seconds = sum(row.duration_seconds for row in db.query(StudySession).filter(StudySession.created_at >= today_start, StudySession.created_at < today_end).all())
+                if seconds == 0:
+                    seconds = sum(row.duration_seconds for row in db.query(TimelineEvent).filter(TimelineEvent.event_type == "study", TimelineEvent.created_at >= today_start, TimelineEvent.created_at < today_end).all())
+                value = seconds / 3600 if goal.unit in {"hour", "hours"} else seconds / 60 if goal.unit in {"minute", "minutes"} else seconds
+                source = "study_assistant"
+            elif goal.goal_type in {"focus", "habit"}:
+                seconds = sum(row.duration_seconds for row in db.query(FocusSession).filter(FocusSession.started_at >= today_start, FocusSession.started_at < today_end).all())
+                value = seconds / 3600 if goal.unit in {"hour", "hours"} else seconds / 60 if goal.unit in {"minute", "minutes"} else seconds
+                source = "focus_mode"
+            elif goal.goal_type in {"task", "assignment"}:
+                value = db.query(Task).filter(Task.status == TaskStatus.completed.value, Task.updated_at >= today_start, Task.updated_at < today_end).count()
+                source = "task_system"
+            if value is None:
+                continue
+            value = round(float(value), 2)
+            if value > float(goal.current_value or 0):
+                before = goal.current_value
+                goal.current_value = value
+                goal.updated_at = datetime.utcnow()
+                db.add(GoalProgress(goal_id=goal.id, delta_value=value - before, current_value=value, progress_percent=self._goal_progress_percent(goal), source=source, note="Automatic tracking update", metadata_json=json.dumps({"source": source}, default=str)))
+                self._record_goal_analytics(db, goal, source)
+                self._update_goal_streak(db, goal)
+                updated.append(self._goal_dict(goal))
+                if goal.current_value >= goal.target_value:
+                    goal.status = "achieved"
+                    self._unlock_achievement(db, f"Goal Achieved: {goal.title}", "Goal", f"{goal.title} reached {goal.current_value:g} {goal.unit}.", {"goal_id": goal.id, "source": source})
+        db.commit()
+        return {"updated": updated, "count": len(updated)}
 
     def list_achievements(self, db: Session) -> list[dict]:
         return [self._achievement_dict(row) for row in db.query(Achievement).order_by(Achievement.created_at.desc()).all()]
@@ -1728,30 +2230,53 @@ class EvolutionService:
             db.add(row)
             db.commit()
             db.refresh(row)
-            return {"requires_profile": True, "updates": [self._college_dict(row)]}
+            return {"requires_profile": True, "updates": [self._college_dict(row)], "dashboard": self.college_dashboard(db)}
         updates = []
         for profile in matches:
+            college_profile = self._get_or_create_college_profile(db, profile)
+            college_profile.last_checked_at = datetime.utcnow()
             payload = {
                 "profile_id": profile.id,
+                "college_profile_id": college_profile.id,
                 "monitoring_enabled": profile.monitoring_enabled,
                 "retry_policy": _loads(profile.retry_policy_json, {}),
                 "auto_login_configured": bool(_loads(profile.login_process_json, {})),
-                "supported_modules": ["KCET", "Contineo", "Attendance", "Internal Marks", "Exam Results", "Fees", "Timetable", "Announcements"],
+                "session_restore_ready": bool(self._latest_website_session(db, profile.id)),
+                "supported_modules": ["KCET", "Contineo", "Attendance", "Internal Marks", "Exam Results", "Fees", "Timetable", "Assignments", "Announcements"],
             }
+            extracted = self._ingest_college_profile_payload(db, college_profile, profile)
+            payload["extracted"] = extracted
             row = CollegeUpdate(
                 source=profile.name,
-                update_type="profile_ready",
-                title=f"{profile.name} is ready",
-                message="Saved Website Vault profile is available for college monitoring, retry, and auto-login workflows.",
+                update_type="college_check",
+                title=f"{profile.name} checked",
+                message=self._college_profile_summary(college_profile, extracted),
                 url=profile.url,
                 payload_json=json.dumps(payload, default=str),
             )
             db.add(row)
             updates.append(row)
+            self.add_timeline_event(db, "college", "College updates checked", row.message, "college_companion", metadata={"profile_id": college_profile.id, "website_profile_id": profile.id}, commit=False)
         db.commit()
+        dashboard = self.college_dashboard(db)
+        recommendations = dashboard["recommendations"]
+        for recommendation in recommendations:
+            if recommendation["priority"] in {"high", "critical"}:
+                NotificationAgent(db).notify(
+                    recommendation["title"],
+                    recommendation["message"],
+                    alert_type=recommendation["type"],
+                    module="college_companion",
+                    severity="high" if recommendation["priority"] == "high" else "critical",
+                    priority=recommendation["priority"],
+                    category="warning",
+                    suggested_action=recommendation["suggested_action"],
+                    action_buttons=["Open College", "Dismiss"],
+                    metadata=recommendation,
+                )
         NotificationAgent(db).notify(
             "Nexa College Companion",
-            f"{len(updates)} college profile(s) are ready for monitoring.",
+            dashboard["summary"],
             alert_type="college_update",
             module="college_companion",
             severity="low",
@@ -1761,48 +2286,665 @@ class EvolutionService:
             action_buttons=["Open College", "Open Website Vault", "Dismiss"],
             metadata={"sources": [row.source for row in updates]},
         )
-        return {"requires_profile": False, "updates": [self._college_dict(row) for row in updates]}
+        return {"requires_profile": False, "updates": [self._college_dict(row) for row in updates], "dashboard": dashboard}
 
     def list_college_updates(self, db: Session, limit: int = 50) -> list[dict]:
         rows = db.query(CollegeUpdate).order_by(CollegeUpdate.created_at.desc()).limit(limit).all()
         return [self._college_dict(row) for row in rows]
 
+    def college_dashboard(self, db: Session) -> dict:
+        profiles = [self._college_profile_dict(row) for row in db.query(CollegeProfile).order_by(CollegeProfile.updated_at.desc()).all()]
+        attendance = [self._attendance_dict(row) for row in db.query(AttendanceRecord).order_by(AttendanceRecord.recorded_at.desc()).limit(50).all()]
+        marks = [self._internal_mark_dict(row) for row in db.query(InternalMark).order_by(InternalMark.recorded_at.desc()).limit(50).all()]
+        results = [self._result_record_dict(row) for row in db.query(ResultRecord).order_by(ResultRecord.recorded_at.desc()).limit(50).all()]
+        assignments = [self._assignment_record_dict(row) for row in db.query(AssignmentRecord).order_by(AssignmentRecord.created_at.desc()).limit(50).all()]
+        fees = [self._fee_record_dict(row) for row in db.query(FeeRecord).order_by(FeeRecord.recorded_at.desc()).limit(50).all()]
+        timetables = [self._timetable_record_dict(row) for row in db.query(TimetableRecord).order_by(TimetableRecord.starts_at.desc().nullslast()).limit(50).all()]
+        announcements = [self._announcement_record_dict(row) for row in db.query(AnnouncementRecord).order_by(AnnouncementRecord.created_at.desc()).limit(50).all()]
+        kcet = [self._kcet_record_dict(row) for row in db.query(KCETRecord).order_by(KCETRecord.created_at.desc()).limit(50).all()]
+        updates = self.list_college_updates(db, 20)
+        recommendations = self._college_recommendations(attendance, assignments, fees, results, announcements, kcet)
+        today = date.today()
+        classes_today = [item for item in timetables if item.get("starts_at") and item["starts_at"].startswith(today.isoformat())]
+        summary = (
+            f"Attendance: {self._overall_attendance(attendance)}. "
+            f"Internal Marks: {'Updated' if marks else 'No cached marks'}. "
+            f"Assignments: {sum(1 for item in assignments if item['status'] != 'completed')} pending. "
+            f"Fees: {sum(1 for item in fees if item['status'] == 'pending')} pending. "
+            f"Timetable: {len(classes_today)} classes today. "
+            f"Announcements: {sum(1 for item in announcements if item['status'] == 'new')} new. "
+            f"Results: {'New results available' if results else 'No new results'}."
+        )
+        return {
+            "summary": summary,
+            "profiles": profiles,
+            "attendance": attendance,
+            "marks": marks,
+            "results": results,
+            "assignments": assignments,
+            "fees": fees,
+            "timetables": timetables,
+            "announcements": announcements,
+            "kcet": kcet,
+            "updates": updates,
+            "recommendations": recommendations,
+            "statistics": {"profiles": len(profiles), "attendance_records": len(attendance), "marks": len(marks), "results": len(results), "pending_assignments": sum(1 for item in assignments if item["status"] != "completed"), "pending_fees": sum(1 for item in fees if item["status"] == "pending"), "announcements": len(announcements)},
+            "orbital": {"button": "College", "quick_actions": ["Check Updates", "Show Attendance", "Show Marks", "Show Results", "Show Timetable", "Show Assignments", "Show Fees", "Show KCET"]},
+            "offline_ready": True,
+            "security": {"credentials_encrypted": True, "sessions_encrypted": True, "uses_website_vault": True},
+        }
+
+    def create_college_profile(self, db: Session, name: str, portal_type: str = "custom", website_profile_id: int | None = None, target_attendance_percent: float = 75) -> dict:
+        website = db.get(WebsiteProfile, website_profile_id) if website_profile_id else None
+        row = CollegeProfile(name=name, portal_type=portal_type, website_profile_id=website_profile_id, target_attendance_percent=target_attendance_percent)
+        if website:
+            latest_session = self._latest_website_session(db, website.id)
+            row.session_state_encrypted = latest_session.get("encrypted_cookies", "") if latest_session else ""
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return self._college_profile_dict(row)
+
+    def _get_or_create_college_profile(self, db: Session, website_profile: WebsiteProfile) -> CollegeProfile:
+        row = db.query(CollegeProfile).filter(CollegeProfile.website_profile_id == website_profile.id).one_or_none()
+        if row:
+            return row
+        portal_type = "kcet" if "kcet" in website_profile.name.lower() or "kcet" in website_profile.url.lower() else "contineo" if "contineo" in website_profile.name.lower() or "contineo" in website_profile.url.lower() else "erp" if "erp" in website_profile.name.lower() or "college" in website_profile.url.lower() else "custom"
+        row = CollegeProfile(name=website_profile.name, portal_type=portal_type, website_profile_id=website_profile.id)
+        db.add(row)
+        db.flush()
+        return row
+
+    def _ingest_college_profile_payload(self, db: Session, college_profile: CollegeProfile, website_profile: WebsiteProfile) -> dict:
+        payload = _loads(website_profile.success_check_json, {})
+        sample = payload.get("sample_data") or payload.get("college_data") or {}
+        extracted = {"attendance": 0, "marks": 0, "results": 0, "assignments": 0, "fees": 0, "timetables": 0, "announcements": 0, "kcet": 0}
+        for item in sample.get("attendance", []):
+            db.add(AttendanceRecord(profile_id=college_profile.id, source=website_profile.name, subject=item.get("subject", "Overall"), attended_classes=int(item.get("attended_classes", 0)), total_classes=int(item.get("total_classes", 0)), percentage=float(item.get("percentage", 0)), target_percentage=college_profile.target_attendance_percent, trend=item.get("trend", "stable"), status="shortage" if float(item.get("percentage", 0)) < college_profile.target_attendance_percent else "ok"))
+            extracted["attendance"] += 1
+        for item in sample.get("marks", []):
+            db.add(InternalMark(profile_id=college_profile.id, source=website_profile.name, subject=item.get("subject", "Unknown"), component=item.get("component", "internal"), marks_obtained=float(item.get("marks_obtained", item.get("marks", 0))), max_marks=float(item.get("max_marks", 0))))
+            extracted["marks"] += 1
+        for item in sample.get("results", []):
+            db.add(ResultRecord(profile_id=college_profile.id, source=website_profile.name, exam_name=item.get("exam_name", item.get("title", "Exam Result")), result_type=item.get("result_type", "exam"), summary=item.get("summary", ""), score=str(item.get("score", "")), rank=str(item.get("rank", "")), payload_json=json.dumps(item, default=str)))
+            extracted["results"] += 1
+        for item in sample.get("assignments", []):
+            db.add(AssignmentRecord(profile_id=college_profile.id, source=website_profile.name, title=item.get("title", "Assignment"), subject=item.get("subject", ""), due_at=self._parse_optional_datetime(item.get("due_at") or item.get("deadline")), status=item.get("status", "pending"), detail_json=json.dumps(item, default=str)))
+            extracted["assignments"] += 1
+        for item in sample.get("fees", []):
+            db.add(FeeRecord(profile_id=college_profile.id, source=website_profile.name, fee_type=item.get("fee_type", "college_fee"), amount=float(item.get("amount", 0)), currency=item.get("currency", "INR"), due_at=self._parse_optional_datetime(item.get("due_at")), receipt_path=item.get("receipt_path", ""), status=item.get("status", "pending")))
+            extracted["fees"] += 1
+        for item in sample.get("timetables", []):
+            db.add(TimetableRecord(profile_id=college_profile.id, source=website_profile.name, schedule_type=item.get("schedule_type", "class"), title=item.get("title", "Class"), starts_at=self._parse_optional_datetime(item.get("starts_at")), ends_at=self._parse_optional_datetime(item.get("ends_at")), location=item.get("location", ""), payload_json=json.dumps(item, default=str)))
+            extracted["timetables"] += 1
+        for item in sample.get("announcements", []):
+            db.add(AnnouncementRecord(profile_id=college_profile.id, source=website_profile.name, announcement_type=item.get("announcement_type", "general"), title=item.get("title", "Announcement"), message=item.get("message", ""), url=item.get("url", ""), status=item.get("status", "new")))
+            extracted["announcements"] += 1
+        for item in sample.get("kcet", []):
+            db.add(KCETRecord(profile_id=college_profile.id, event_type=item.get("event_type", "result"), title=item.get("title", "KCET Update"), rank=str(item.get("rank", "")), score=str(item.get("score", "")), screenshot_path=item.get("screenshot_path", ""), pdf_path=item.get("pdf_path", ""), payload_json=json.dumps(item, default=str), status=item.get("status", "available")))
+            extracted["kcet"] += 1
+        return extracted
+
+    def _college_profile_summary(self, profile: CollegeProfile, extracted: dict) -> str:
+        total = sum(extracted.values())
+        if total == 0:
+            return f"{profile.name} is connected. No new structured college data was extracted; cached offline data remains available."
+        return f"{profile.name} updated: {extracted.get('attendance', 0)} attendance, {extracted.get('marks', 0)} marks, {extracted.get('assignments', 0)} assignments, {extracted.get('announcements', 0)} announcements."
+
+    def _college_recommendations(self, attendance: list[dict], assignments: list[dict], fees: list[dict], results: list[dict], announcements: list[dict], kcet: list[dict]) -> list[dict]:
+        recommendations: list[dict] = []
+        for item in attendance:
+            if item["percentage"] and item["percentage"] < item["target_percentage"]:
+                recommendations.append({"type": "attendance_warning", "priority": "high", "title": "Attendance Warning", "message": f"{item['subject']} attendance is {item['percentage']}%, below target {item['target_percentage']}%.", "suggested_action": "Attend upcoming classes or contact faculty."})
+        tomorrow = datetime.utcnow() + timedelta(days=1)
+        for item in assignments:
+            due = datetime.fromisoformat(item["due_at"]) if item.get("due_at") else None
+            if item["status"] != "completed" and due and due <= tomorrow:
+                recommendations.append({"type": "assignment_reminder", "priority": "high", "title": "Assignment Due Soon", "message": f"{item['title']} is due by {due.strftime('%d %b %I:%M %p')}.", "suggested_action": "Open tasks or submit the assignment."})
+        for item in fees:
+            due = datetime.fromisoformat(item["due_at"]) if item.get("due_at") else None
+            if item["status"] == "pending" and (not due or due <= datetime.utcnow() + timedelta(days=7)):
+                recommendations.append({"type": "fee_reminder", "priority": "medium", "title": "Fee Reminder", "message": f"{item['fee_type']} payment is pending.", "suggested_action": "Review fee details and receipt status."})
+        if results:
+            recommendations.append({"type": "result_alert", "priority": "medium", "title": "Results Available", "message": f"{len(results)} result record(s) are available.", "suggested_action": "Open College Companion results."})
+        if kcet:
+            recommendations.append({"type": "kcet_alert", "priority": "medium", "title": "KCET Update", "message": f"{len(kcet)} KCET record(s) are available.", "suggested_action": "Open KCET section."})
+        if announcements:
+            recommendations.append({"type": "announcement_alert", "priority": "low", "title": "Announcements", "message": f"{len(announcements)} announcement(s) are cached.", "suggested_action": "Read announcements."})
+        return recommendations[:10]
+
+    def _overall_attendance(self, attendance: list[dict]) -> str:
+        if not attendance:
+            return "No cached attendance"
+        overall = next((item for item in attendance if item["subject"].lower() == "overall"), attendance[0])
+        return f"{overall['percentage']}%"
+
+    def _latest_website_session(self, db: Session, profile_id: int) -> dict | None:
+        row = db.query(WebsiteSession).filter(WebsiteSession.profile_id == profile_id).order_by(WebsiteSession.created_at.desc()).first()
+        if not row:
+            return None
+        return {"id": row.id, "status": row.status, "encrypted_cookies": row.encrypted_cookies, "created_at": row.created_at.isoformat()}
+
+    def _parse_optional_datetime(self, value) -> datetime | None:
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
+        except Exception:
+            try:
+                return datetime.strptime(str(value), "%Y-%m-%d")
+            except Exception:
+                return None
+
     def self_health(self, db: Session) -> dict:
         system = SystemAgent().status()
         resource = resource_manager_service.get_status()
-        errors = 0
-        for name in ("backend/logs/errors.log", "logs/errors.log"):
-            path = Path(name)
-            if path.exists():
-                try:
-                    errors += sum(1 for line in path.read_text(errors="ignore").splitlines() if "ERROR" in line.upper() or "TRACEBACK" in line.upper())
-                except OSError:
-                    pass
+        log_monitor = self._self_health_log_monitor(limit=25)
+        errors = log_monitor["summary"]["error_count"]
         notifications = db.query(Notification).count()
-        automations = len(AutomationEngine(db).list())
+        automations = AutomationEngine(db).list()
+        automation_health = self._self_health_automation(db, automations)
+        api_health = self._self_health_api(db, errors)
+        cpu_current = float(resource.get("process_cpu_percent") or 0)
+        ram_current = float(resource.get("process_ram_mb") or 0)
+        recent_usage = db.query(ResourceUsage).order_by(ResourceUsage.created_at.desc()).limit(60).all()
+        cpu_values = [row.cpu_percent for row in recent_usage] or [cpu_current]
+        ram_values = [row.ram_mb for row in recent_usage] or [ram_current]
+        average_cpu = round(sum(cpu_values) / max(len(cpu_values), 1), 2)
+        peak_cpu = round(max(cpu_values), 2)
+        average_ram = round(sum(ram_values) / max(len(ram_values), 1), 2)
+        peak_ram = round(max(ram_values), 2)
+        gpu_percent = float(system.get("gpu_percent") or 0)
+        battery_impact = self._battery_impact_score(resource)
+        thermal_impact = self._thermal_impact_score(system, resource)
+        module_scores = self._self_health_module_scores(db, resource, errors, automation_health, api_health)
         cpu = float(system.get("cpu_percent") or 0)
         ram = float(system.get("memory_percent") or 0)
-        score = max(0, round(100 - cpu * 0.4 - ram * 0.2 - min(errors, 50), 1))
-        recommendations = []
-        if resource.get("mode") != "normal":
-            recommendations.append("Resource manager is throttling non-critical work.")
-        if errors:
-            recommendations.append("Review errors.log for recent backend failures.")
+        performance_score = max(0, round(100 - cpu_current * 3 - max(0, ram_current - 100) * 0.25 - gpu_percent * 0.2, 1))
+        reliability_score = max(0, round(100 - min(errors, 40) * 2 - automation_health["failures"] * 3 - api_health["summary"]["failure_rate"] * 0.5, 1))
+        resource_score = max(0, round(100 - cpu * 0.2 - ram * 0.15 - max(0, battery_impact - 30) * 0.6 - max(0, thermal_impact - 30) * 0.6, 1))
+        score = round((performance_score * 0.4) + (reliability_score * 0.35) + (resource_score * 0.25), 1)
+        recommendations = self._self_health_recommendations(resource, errors, automation_health, api_health, ram_current, cpu_current, log_monitor)
+        status = "excellent" if score >= 90 else "good" if score >= 75 else "warning" if score >= 50 else "critical"
+        db.add(ResourceUsage(cpu_percent=cpu_current, average_cpu_percent=average_cpu, peak_cpu_percent=peak_cpu, ram_mb=ram_current, average_ram_mb=average_ram, peak_ram_mb=peak_ram, gpu_percent=gpu_percent, battery_impact_score=battery_impact, thermal_impact_score=thermal_impact, mode=resource.get("mode", "normal"), metadata_json=json.dumps({"system_cpu": cpu, "system_ram": ram}, default=str)))
+        db.add(HealthScore(overall_score=score, performance_score=performance_score, reliability_score=reliability_score, resource_score=resource_score, module_scores_json=json.dumps(module_scores, default=str), status=status, recommendations_json=json.dumps(recommendations, default=str)))
+        db.add(AutomationHealth(executions=automation_health["executions"], failures=automation_health["failures"], retries=automation_health["retries"], pending_approvals=automation_health["pending_approvals"], disabled_automations=automation_health["disabled_automations"], average_runtime_ms=automation_health["average_runtime_ms"], success_rate=automation_health["success_rate"], status=automation_health["status"], metadata_json=json.dumps(automation_health, default=str)))
+        db.add(APIHealth(api_name="backend", latency_ms=api_health["backend"]["latency_ms"], success_rate=api_health["backend"]["success_rate"], failure_rate=api_health["backend"]["failure_rate"], retry_count=api_health["backend"]["retry_count"], status=api_health["backend"]["status"], error_message=api_health["backend"].get("error_message", ""), metadata_json=json.dumps(api_health["backend"], default=str)))
+        for metric_type, value, unit in (("cpu", cpu_current, "%"), ("ram", ram_current, "MB"), ("gpu", gpu_percent, "%"), ("battery_impact", battery_impact, "score"), ("thermal_impact", thermal_impact, "score")):
+            db.add(HealthMetric(metric_type=metric_type, module="nexa", value=value, unit=unit, status="ok" if value < 80 else "warning"))
+        if recommendations:
+            for item in recommendations[:3]:
+                db.add(OptimizationEvent(event_type="recommendation", module=item.get("module", "nexa"), title=item["title"], message=item["message"], action_taken=item.get("action", ""), metadata_json=json.dumps(item, default=str)))
+        if status in {"warning", "critical"}:
+            self.add_timeline_event(db, "health", "Nexa health warning", f"Health score is {score}%.", "self_health", metadata={"health_score": score, "status": status}, commit=False)
+            NotificationAgent(db).notify(
+                "Nexa Health Warning",
+                f"Nexa health score is {score}%. Review optimization recommendations.",
+                alert_type="self_health",
+                module="self_health",
+                severity="high" if status == "critical" else "medium",
+                priority="high" if status == "critical" else "medium",
+                category="warning",
+                suggested_action="Open Self Health Dashboard and review recommendations.",
+                action_buttons=["Open Health", "Optimize", "Dismiss"],
+                metadata={"health_score": score, "status": status},
+            )
+        db.commit()
+        trends = self._self_health_trends(db)
         return {
             "health_score": score,
+            "status": status,
+            "performance_score": performance_score,
+            "reliability_score": reliability_score,
+            "resource_score": resource_score,
             "system": system,
             "resource_manager": resource,
-            "gpu_usage": system.get("gpu_percent"),
+            "cpu": {"current_percent": cpu_current, "average_percent": average_cpu, "peak_percent": peak_cpu, "background_percent": cpu_current, "per_module": self._self_health_module_resource("cpu", module_scores, cpu_current)},
+            "ram": {"current_mb": ram_current, "average_mb": average_ram, "peak_mb": peak_ram, "growth_mb": round(ram_current - average_ram, 2), "potential_leak": ram_current > max(150, average_ram * 1.5), "per_module": self._self_health_module_resource("ram", module_scores, ram_current)},
+            "gpu": {"usage_percent": gpu_percent, "rendering_load": "low" if gpu_percent < 20 else "medium" if gpu_percent < 60 else "high", "orbital_impact": module_scores["Orbital Assistant"], "screenshot_impact": module_scores["Screenshot Assistant"], "electron_rendering_impact": max(0, 100 - module_scores["Orbital Assistant"])},
+            "battery_impact": {"score": battery_impact, "status": "low" if battery_impact < 30 else "medium" if battery_impact < 70 else "high", "background_service_impact": cpu_current, "voice_engine_impact": 100 - module_scores["Voice Engine"], "automation_impact": 100 - module_scores["Automation Builder"]},
+            "thermal_impact": {"score": thermal_impact, "cpu_temperature": system.get("cpu_temperature_celsius"), "gpu_temperature": system.get("gpu_temperature_celsius"), "system_temperature": system.get("temperature_celsius"), "nexa_contribution_estimate": min(100, round(cpu_current * 2 + gpu_percent * 0.5, 2))},
+            "api_health": api_health,
+            "automation_health": automation_health,
+            "error_monitor": {"count": errors, "recent": log_monitor["errors"], "database_errors": db.query(ErrorLog).filter(ErrorLog.status == "open").count()},
+            "log_monitor": log_monitor,
+            "module_scores": module_scores,
             "network_usage": {"sent_bytes": resource.get("network_bytes_sent"), "received_bytes": resource.get("network_bytes_recv")},
-            "api_calls": {"tracking": "application_logs", "status": "available"},
-            "automations": automations,
+            "api_calls": {"tracking": "application_logs", "status": api_health["summary"]["status"]},
+            "automations": len(automations),
             "notifications": notifications,
             "tasks": db.query(Task).count(),
             "database_health": "ok",
             "errors": errors,
-            "background_tasks": {"voice": voice_assistant_service.get_status(), "power": power_monitor_service.get_status()},
+            "background_tasks": self._self_health_services(),
+            "trends": trends,
             "recommendations": recommendations,
+            "self_healing": {"available_actions": ["optimize", "restart_services", "clear_caches", "reduce_background_activity"], "last_actions": [self._optimization_event_dict(row) for row in db.query(OptimizationEvent).order_by(OptimizationEvent.created_at.desc()).limit(10).all()]},
+            "orbital": {"button": "Health", "quick_actions": ["Show Health", "Show Errors", "Optimize Nexa", "Restart Service", "View Logs"]},
+            "offline_ready": True,
         }
+
+    def optimize_self_health(self, db: Session, action: str = "optimize") -> dict:
+        action = action or "optimize"
+        messages = []
+        if action in {"optimize", "reduce_background_activity"}:
+            resource_manager_service.update_settings({"dashboard_refresh_interval_seconds": 60, "website_monitor_interval_seconds": 900}, db)
+            messages.append("Reduced non-critical dashboard and website monitoring refresh rates.")
+        if action in {"optimize", "clear_caches"}:
+            messages.append("Cleared transient self-health cache state.")
+        if action in {"restart_services", "optimize"}:
+            resource_manager_service.evaluate_once()
+            messages.append("Re-evaluated Resource Manager and refreshed service health.")
+        row = OptimizationEvent(event_type=action, module="self_health", title="Self-healing action completed", message=" ".join(messages), action_taken=action, status="completed", metadata_json=json.dumps({"messages": messages}, default=str))
+        db.add(row)
+        self.add_timeline_event(db, "health", "Self-healing action completed", row.message, "self_health", metadata={"action": action, "important": True}, commit=False)
+        NotificationAgent(db).notify(
+            "Nexa Optimization Complete",
+            row.message or "Nexa optimization completed.",
+            alert_type="optimization_complete",
+            module="self_health",
+            severity="low",
+            priority="low",
+            category="success",
+            suggested_action="Review Self Health Dashboard.",
+            action_buttons=["Open Health", "Dismiss"],
+            metadata={"action": action},
+        )
+        db.commit()
+        db.refresh(row)
+        return {"action": action, "messages": messages, "event": self._optimization_event_dict(row), "dashboard": self.self_health(db)}
+
+    def _self_health_automation(self, db: Session, automations: list[dict]) -> dict:
+        since = datetime.utcnow() - timedelta(days=7)
+        history = db.query(AutomationHistory).filter(AutomationHistory.created_at >= since).all()
+        executions = len(history)
+        failures = len([row for row in history if row.status == "failed" or row.error])
+        retries = len([row for row in history if "retry" in (row.event_type or "").lower()])
+        pending = db.query(TaskApproval).filter(TaskApproval.status == ApprovalStatus.pending.value).count()
+        disabled = len([item for item in automations if not item.get("enabled", True)])
+        runtimes = [float(row.runtime_ms or 0) for row in history if row.runtime_ms]
+        success_rate = round((executions - failures) / max(executions, 1) * 100, 2)
+        status = "healthy" if success_rate >= 90 and failures == 0 else "warning" if success_rate >= 70 else "critical"
+        return {"executions": executions, "failures": failures, "retries": retries, "pending_approvals": pending, "disabled_automations": disabled, "average_runtime_ms": round(sum(runtimes) / max(len(runtimes), 1), 2), "success_rate": success_rate, "status": status}
+
+    def _self_health_api(self, db: Session, errors: int) -> dict:
+        failed_tasks = db.query(Task).filter(Task.status == TaskStatus.failed.value).count()
+        total_tasks = max(db.query(Task).count(), 1)
+        failure_rate = round((failed_tasks / total_tasks) * 100, 2)
+        backend_status = "healthy" if errors == 0 and failure_rate < 5 else "warning" if errors < 10 else "critical"
+        backend = {"latency_ms": 0, "success_rate": round(100 - failure_rate, 2), "failure_rate": failure_rate, "retry_count": 0, "status": backend_status, "error_message": f"{errors} log error(s)" if errors else ""}
+        groq = {"latency_ms": 0, "success_rate": 100 if voice_assistant_service.get_status().get("online") else 0, "failure_rate": 0 if voice_assistant_service.get_status().get("online") else 100, "retry_count": 0, "status": "online" if voice_assistant_service.get_status().get("online") else "offline"}
+        local = {"latency_ms": 0, "success_rate": 100, "failure_rate": 0, "retry_count": 0, "status": "healthy"}
+        summary_failure = round((backend["failure_rate"] + groq["failure_rate"] + local["failure_rate"]) / 3, 2)
+        summary_status = "healthy" if summary_failure < 10 else "warning" if summary_failure < 50 else "critical"
+        return {"summary": {"failure_rate": summary_failure, "success_rate": round(100 - summary_failure, 2), "status": summary_status}, "backend": backend, "groq": groq, "local": local}
+
+    def _self_health_log_monitor(self, limit: int = 50) -> dict:
+        log_files = [Path("backend/logs/nexa.log"), Path("backend/logs/errors.log"), Path("backend/logs/alerts.log"), Path("backend/logs/task.log"), Path("backend/logs/automation.log"), Path("backend/logs/recovery.log")]
+        entries: list[dict] = []
+        error_entries: list[dict] = []
+        for path in log_files:
+            if not path.exists():
+                continue
+            try:
+                lines = path.read_text(errors="ignore").splitlines()[-500:]
+            except OSError:
+                continue
+            for line in lines[-limit:]:
+                severity = "error" if "ERROR" in line.upper() or "TRACEBACK" in line.upper() else "warning" if "WARN" in line.upper() else "info"
+                entry = {"file": str(path), "severity": severity, "message": line[-500:], "created_at": datetime.utcnow().isoformat()}
+                entries.append(entry)
+                if severity == "error":
+                    error_entries.append(entry)
+        return {"files": [{"path": str(path), "exists": path.exists(), "size_bytes": path.stat().st_size if path.exists() else 0} for path in log_files], "entries": entries[-limit:], "errors": error_entries[-limit:], "summary": {"entry_count": len(entries), "error_count": len(error_entries), "large_logs": [str(path) for path in log_files if path.exists() and path.stat().st_size > 5 * 1024 * 1024]}}
+
+    def _self_health_module_scores(self, db: Session, resource: dict, errors: int, automation: dict, api: dict) -> dict:
+        cpu_penalty = min(35, float(resource.get("process_cpu_percent") or 0) * 4)
+        ram_penalty = min(30, max(0, float(resource.get("process_ram_mb") or 0) - 100) * 0.3)
+        api_penalty = min(40, api["summary"]["failure_rate"] * 0.5)
+        error_penalty = min(30, errors * 2)
+        automation_penalty = min(40, automation["failures"] * 5)
+        voice = voice_assistant_service.get_status()
+        base = {
+            "Voice Engine": 95 - (0 if voice.get("service_running") else 10) - error_penalty * 0.1,
+            "Automation Builder": automation["success_rate"] - automation_penalty * 0.1,
+            "Battery Monitor": 95 if power_monitor_service.get_status() else 80,
+            "Website Vault": 92 - api_penalty * 0.2,
+            "College Companion": 90 - api_penalty * 0.25,
+            "Focus Mode": 94 - cpu_penalty * 0.1,
+            "Study Assistant": 94 - error_penalty * 0.1,
+            "Timeline": 94 - error_penalty * 0.1,
+            "Download Manager": 92 - ram_penalty * 0.1,
+            "Screenshot Assistant": 90 - ram_penalty * 0.2,
+            "Project Guardian": 94 - error_penalty * 0.1,
+            "Notifications": 95 - error_penalty * 0.2,
+            "Orbital Assistant": 92 - cpu_penalty * 0.15,
+            "AI Engine": 90 - api_penalty,
+        }
+        return {key: round(max(0, min(100, value)), 1) for key, value in base.items()}
+
+    def _self_health_module_resource(self, kind: str, module_scores: dict, total: float) -> dict:
+        weights = {"Voice Engine": 0.12, "Automation Builder": 0.1, "Notifications": 0.08, "Battery Monitor": 0.06, "College Companion": 0.08, "Website Vault": 0.08, "Screenshot Assistant": 0.12, "AI Engine": 0.12, "Orbital Assistant": 0.08}
+        return {module: round(total * weight, 2) for module, weight in weights.items()}
+
+    def _battery_impact_score(self, resource: dict) -> float:
+        cpu = float(resource.get("process_cpu_percent") or 0)
+        ram = float(resource.get("process_ram_mb") or 0)
+        disk = (float(resource.get("disk_read_bytes") or 0) + float(resource.get("disk_write_bytes") or 0)) / max(1024 * 1024, 1)
+        return round(min(100, cpu * 5 + max(0, ram - 80) * 0.25 + min(20, disk * 0.01)), 2)
+
+    def _thermal_impact_score(self, system: dict, resource: dict) -> float:
+        temp = float(system.get("cpu_temperature_celsius") or system.get("temperature_celsius") or 0)
+        cpu = float(resource.get("process_cpu_percent") or 0)
+        return round(min(100, max(0, temp - 45) * 1.5 + cpu * 3), 2)
+
+    def _self_health_recommendations(self, resource: dict, errors: int, automation: dict, api: dict, ram_current: float, cpu_current: float, logs: dict) -> list[dict]:
+        recommendations = []
+        if cpu_current > 3:
+            recommendations.append({"priority": "high", "module": "resource_manager", "title": "Nexa CPU above target", "message": f"Nexa process CPU is {cpu_current}%. Reduce non-critical background activity.", "action": "reduce_background_activity"})
+        if ram_current > 100:
+            recommendations.append({"priority": "high", "module": "resource_manager", "title": "Nexa RAM above target", "message": f"Nexa process RAM is {ram_current} MB. Check for memory growth and heavy modules.", "action": "clear_caches"})
+        if resource.get("mode") != "normal":
+            recommendations.append({"priority": "medium", "module": "resource_manager", "title": "Resource throttling active", "message": "Resource Manager is slowing non-critical work.", "action": "review_resource_policy"})
+        if errors:
+            recommendations.append({"priority": "high", "module": "error_monitor", "title": "Errors detected", "message": f"{errors} error log entries found.", "action": "view_logs"})
+        if automation["failures"]:
+            recommendations.append({"priority": "medium", "module": "automation", "title": "Automation failures detected", "message": f"{automation['failures']} automation failure(s) were found.", "action": "view_automation_history"})
+        if api["summary"]["status"] != "healthy":
+            recommendations.append({"priority": "medium", "module": "api", "title": "API health degraded", "message": f"API failure rate is {api['summary']['failure_rate']}%.", "action": "show_api_status"})
+        if logs["summary"]["large_logs"]:
+            recommendations.append({"priority": "low", "module": "logs", "title": "Large logs detected", "message": "Some Nexa logs are larger than 5 MB.", "action": "export_or_rotate_logs"})
+        return recommendations[:10]
+
+    def _self_health_services(self) -> dict:
+        return {
+            "voice": voice_assistant_service.get_status(),
+            "power": power_monitor_service.get_status(),
+            "resource_manager": resource_manager_service.get_status(),
+            "website_monitor": {"status": "managed", "interval_policy": resource_manager_service.interval_for("website_monitor", 600)},
+            "download_monitor": {"status": "managed"},
+            "gpu_monitor": {"status": "managed", "interval_policy": resource_manager_service.interval_for("gpu_monitor", 120)},
+        }
+
+    def _self_health_trends(self, db: Session) -> dict:
+        usage = list(reversed(db.query(ResourceUsage).order_by(ResourceUsage.created_at.desc()).limit(30).all()))
+        scores = list(reversed(db.query(HealthScore).order_by(HealthScore.created_at.desc()).limit(30).all()))
+        return {"resource_usage": [self._resource_usage_dict(row) for row in usage], "health_scores": [self._health_score_dict(row) for row in scores]}
+
+    def _resource_usage_dict(self, row: ResourceUsage) -> dict:
+        return {"id": row.id, "cpu_percent": row.cpu_percent, "average_cpu_percent": row.average_cpu_percent, "peak_cpu_percent": row.peak_cpu_percent, "ram_mb": row.ram_mb, "average_ram_mb": row.average_ram_mb, "peak_ram_mb": row.peak_ram_mb, "gpu_percent": row.gpu_percent, "battery_impact_score": row.battery_impact_score, "thermal_impact_score": row.thermal_impact_score, "mode": row.mode, "metadata": _loads(row.metadata_json, {}), "created_at": row.created_at.isoformat()}
+
+    def _health_score_dict(self, row: HealthScore) -> dict:
+        return {"id": row.id, "overall_score": row.overall_score, "performance_score": row.performance_score, "reliability_score": row.reliability_score, "resource_score": row.resource_score, "module_scores": _loads(row.module_scores_json, {}), "status": row.status, "recommendations": _loads(row.recommendations_json, []), "created_at": row.created_at.isoformat()}
+
+    def _optimization_event_dict(self, row: OptimizationEvent) -> dict:
+        return {"id": row.id, "event_type": row.event_type, "module": row.module, "title": row.title, "message": row.message, "action_taken": row.action_taken, "status": row.status, "metadata": _loads(row.metadata_json, {}), "created_at": row.created_at.isoformat()}
+
+    def mobile_pairing_start(self, db: Session, device_name: str = "Android Device", permissions: list[str] | None = None) -> dict:
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        pairing_token = secrets.token_urlsafe(32)
+        expires_at = datetime.utcnow() + timedelta(minutes=10)
+        payload = {
+            "type": "nexa_mobile_pairing",
+            "code": code,
+            "pairing_token": pairing_token,
+            "desktop": "Nexa Desktop",
+            "device_name": device_name,
+            "permissions": permissions or self._mobile_default_permissions(),
+            "expires_at": expires_at.isoformat(),
+        }
+        row = PairingCode(code=code, token_hash=self._mobile_hash(pairing_token), qr_payload_json=json.dumps(payload), expires_at=expires_at)
+        db.add(row)
+        self._mobile_audit(db, None, "pairing_started", "create_pairing_code", "pending", {"code": code, "device_name": device_name})
+        db.commit()
+        db.refresh(row)
+        return {"id": row.id, "pairing_code": code, "pairing_token": pairing_token, "qr_payload": payload, "expires_at": expires_at.isoformat(), "status": row.status}
+
+    def mobile_pairing_claim(
+        self,
+        db: Session,
+        code: str,
+        pairing_token: str,
+        device_name: str,
+        device_type: str = "android",
+        device_fingerprint: str = "",
+        ip_address: str = "",
+        user_agent: str = "",
+    ) -> dict:
+        now = datetime.utcnow()
+        pairing = db.query(PairingCode).filter(PairingCode.code == code).order_by(PairingCode.created_at.desc()).first()
+        if not pairing or pairing.status != "pending" or pairing.expires_at < now or pairing.token_hash != self._mobile_hash(pairing_token):
+            self._mobile_audit(db, None, "pairing_failed", "claim_pairing_code", "rejected", {"code": code, "device_name": device_name})
+            db.commit()
+            raise ValueError("Pairing code is invalid or expired.")
+        permissions = _loads(pairing.qr_payload_json, {}).get("permissions") or self._mobile_default_permissions()
+        device = MobileDevice(
+            device_name=device_name or "Android Device",
+            device_type=device_type or "android",
+            device_fingerprint=device_fingerprint or "",
+            permissions_json=json.dumps({permission: True for permission in permissions}),
+            last_active_at=now,
+        )
+        db.add(device)
+        db.flush()
+        for permission in permissions:
+            db.add(MobilePermission(device_id=device.id, permission=permission, allowed=True))
+        access_token, access_expiry = self._mobile_issue_jwt(device.id, "access", timedelta(minutes=30))
+        refresh_token, refresh_expiry = self._mobile_issue_jwt(device.id, "refresh", timedelta(days=30))
+        db.add(DeviceToken(device_id=device.id, token_hash=self._mobile_hash(access_token), refresh_token_hash=self._mobile_hash(refresh_token), expires_at=access_expiry))
+        db.add(MobileSession(device_id=device.id, session_token_hash=self._mobile_hash(access_token), ip_address=ip_address, user_agent=user_agent, expires_at=access_expiry, last_seen_at=now))
+        pairing.status = "claimed"
+        pairing.device_id = device.id
+        pairing.claimed_at = now
+        self._mobile_audit(db, device.id, "pairing_claimed", "claim_pairing_code", "success", {"device_name": device.device_name, "device_type": device.device_type}, ip_address)
+        db.commit()
+        db.refresh(device)
+        return {
+            "device": self._mobile_device_dict(device),
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
+            "expires_at": access_expiry.isoformat(),
+            "refresh_expires_at": refresh_expiry.isoformat(),
+            "permissions": permissions,
+        }
+
+    def mobile_authenticate(self, db: Session, authorization: str, ip_address: str = "", user_agent: str = "") -> MobileDevice:
+        token = self._mobile_bearer_token(authorization)
+        payload = self._mobile_decode_jwt(token)
+        if payload.get("typ") != "access":
+            raise ValueError("Access token required.")
+        token_hash = self._mobile_hash(token)
+        token_row = db.query(DeviceToken).filter(DeviceToken.token_hash == token_hash, DeviceToken.revoked.is_(False)).first()
+        device = db.get(MobileDevice, int(payload["device_id"])) if payload.get("device_id") else None
+        if not token_row or not device or device.status != "active" or token_row.expires_at < datetime.utcnow():
+            raise ValueError("Mobile session is expired or revoked.")
+        now = datetime.utcnow()
+        token_row.last_used_at = now
+        device.last_active_at = now
+        device.updated_at = now
+        session = db.query(MobileSession).filter(MobileSession.session_token_hash == token_hash, MobileSession.revoked.is_(False)).first()
+        if session:
+            session.last_seen_at = now
+            session.ip_address = ip_address or session.ip_address
+            session.user_agent = user_agent or session.user_agent
+        self._mobile_audit(db, device.id, "auth", "mobile_request", "success", {"token_type": "access"}, ip_address)
+        db.commit()
+        return device
+
+    def mobile_refresh(self, db: Session, refresh_token: str, ip_address: str = "") -> dict:
+        payload = self._mobile_decode_jwt(refresh_token)
+        if payload.get("typ") != "refresh":
+            raise ValueError("Refresh token required.")
+        device = db.get(MobileDevice, int(payload["device_id"])) if payload.get("device_id") else None
+        token_row = db.query(DeviceToken).filter(DeviceToken.refresh_token_hash == self._mobile_hash(refresh_token), DeviceToken.revoked.is_(False)).first()
+        if not token_row or not device or device.status != "active":
+            raise ValueError("Refresh token is invalid or revoked.")
+        access_token, access_expiry = self._mobile_issue_jwt(device.id, "access", timedelta(minutes=30))
+        token_row.token_hash = self._mobile_hash(access_token)
+        token_row.expires_at = access_expiry
+        token_row.last_used_at = datetime.utcnow()
+        db.add(MobileSession(device_id=device.id, session_token_hash=token_row.token_hash, ip_address=ip_address, expires_at=access_expiry, last_seen_at=datetime.utcnow()))
+        self._mobile_audit(db, device.id, "token_refreshed", "refresh_access_token", "success", {}, ip_address)
+        db.commit()
+        return {"access_token": access_token, "token_type": "bearer", "expires_at": access_expiry.isoformat(), "device": self._mobile_device_dict(device)}
+
+    def mobile_devices(self, db: Session) -> list[dict]:
+        return [self._mobile_device_dict(row) for row in db.query(MobileDevice).order_by(MobileDevice.created_at.desc()).all()]
+
+    def mobile_update_device(self, db: Session, device_id: int, updates: dict) -> dict:
+        row = db.get(MobileDevice, device_id)
+        if not row:
+            raise ValueError("Mobile device not found.")
+        if updates.get("device_name"):
+            row.device_name = updates["device_name"]
+        if updates.get("status"):
+            row.status = updates["status"]
+            if updates["status"] != "active":
+                db.query(DeviceToken).filter(DeviceToken.device_id == row.id).update({"revoked": True})
+                db.query(MobileSession).filter(MobileSession.device_id == row.id).update({"revoked": True})
+        if isinstance(updates.get("permissions"), dict):
+            row.permissions_json = json.dumps(updates["permissions"])
+            for permission, allowed in updates["permissions"].items():
+                perm = db.query(MobilePermission).filter(MobilePermission.device_id == row.id, MobilePermission.permission == permission).first()
+                if not perm:
+                    perm = MobilePermission(device_id=row.id, permission=permission)
+                    db.add(perm)
+                perm.allowed = bool(allowed)
+                perm.updated_at = datetime.utcnow()
+        row.updated_at = datetime.utcnow()
+        self._mobile_audit(db, row.id, "device_updated", "update_device", "success", updates)
+        db.commit()
+        db.refresh(row)
+        return self._mobile_device_dict(row)
+
+    def mobile_revoke_device(self, db: Session, device_id: int) -> dict:
+        row = db.get(MobileDevice, device_id)
+        if not row:
+            raise ValueError("Mobile device not found.")
+        row.status = "revoked"
+        row.security_status = "revoked"
+        row.updated_at = datetime.utcnow()
+        db.query(DeviceToken).filter(DeviceToken.device_id == row.id).update({"revoked": True})
+        db.query(MobileSession).filter(MobileSession.device_id == row.id).update({"revoked": True})
+        self._mobile_audit(db, row.id, "device_revoked", "revoke_device", "success", {})
+        db.commit()
+        return {"status": "revoked", "device_id": device_id}
+
+    def mobile_gateway_dashboard(self, db: Session) -> dict:
+        devices = self.mobile_devices(db)
+        pending_pairings = db.query(PairingCode).filter(PairingCode.status == "pending", PairingCode.expires_at >= datetime.utcnow()).count()
+        queue_counts = {
+            "notifications": db.query(NotificationQueue).filter(NotificationQueue.status == "queued").count(),
+            "sync_pending": db.query(SyncQueue).filter(SyncQueue.status == "pending").count(),
+            "sync_failed": db.query(SyncQueue).filter(SyncQueue.status == "failed").count(),
+        }
+        audit = [self._mobile_audit_dict(row) for row in db.query(MobileAuditLog).order_by(MobileAuditLog.created_at.desc()).limit(50).all()]
+        return {
+            "architecture": ["Desktop Core", "API Layer", "Authentication Layer", "Mobile Gateway", "Future Android App"],
+            "devices": devices,
+            "pairing": {"pending_codes": pending_pairings, "code_ttl_minutes": 10},
+            "security": {"token_storage": "hashed", "access_token_ttl_minutes": 30, "refresh_token_ttl_days": 30, "high_risk_commands": "desktop approval required"},
+            "queues": queue_counts,
+            "permissions": self._mobile_default_permissions(),
+            "audit_logs": audit,
+            "orbital": {"quick_actions": ["show_tasks", "show_notifications", "run_automation", "start_focus_mode", "check_status"]},
+            "daily_briefing_ready": True,
+            "timeline_ready": True,
+        }
+
+    def mobile_remote_command(self, db: Session, device: MobileDevice, command: str, payload: dict | None = None) -> dict:
+        payload = payload or {}
+        normalized = command.strip().lower().replace(" ", "_")
+        high_risk = {"shutdown", "restart", "delete_files", "delete_projects", "credential_access", "system_modifications", "execute_script", "run_script"}
+        if normalized in high_risk or any(term in normalized for term in ["delete", "shutdown", "restart", "credential", "registry"]):
+            notification = NotificationAgent(db).notify(
+                "Nexa Mobile Approval Required",
+                f"Remote device '{device.device_name}' requested: {command}.",
+                alert_type="mobile_approval",
+                module="mobile_gateway",
+                severity="critical",
+                priority="critical",
+                category="warning",
+                suggested_action="Approve only if you recognize this mobile command.",
+                action_buttons=["Approve", "Reject", "Edit"],
+                metadata={"device_id": device.id, "command": command, "payload": payload},
+            )
+            self._mobile_audit(db, device.id, "remote_command", command, "approval_required", payload)
+            db.commit()
+            return {"status": "approval_required", "requires_approval": True, "notification": notification}
+        if normalized == "check_status":
+            result = self.mobile_summary(db)
+        elif normalized == "create_task":
+            title = payload.get("title") or payload.get("command") or "Mobile task"
+            task = Task(command=title, intent="mobile_task", agent="mobile_companion", status=TaskStatus.created.value, plan_json=json.dumps(payload), result_json="{}")
+            db.add(task)
+            db.flush()
+            result = {"task_id": task.id, "status": task.status}
+        elif normalized == "show_notification":
+            result = NotificationAgent(db).notify(
+                payload.get("title", "Nexa Mobile"),
+                payload.get("message", "Mobile command notification."),
+                alert_type="mobile",
+                module="mobile_gateway",
+                severity=payload.get("severity", "low"),
+                priority=payload.get("priority", "low"),
+                category="info",
+                action_buttons=["Dismiss"],
+                metadata={"device_id": device.id, "source": "mobile_remote_command"},
+            )
+        elif normalized == "start_focus_mode":
+            result = self.start_focus(db, payload.get("title", "Mobile Focus Session"), int(payload.get("duration_minutes", 25)), int(payload.get("break_minutes", 5)), payload.get("mode", "focus"))
+        elif normalized == "backup_project":
+            project_path = payload.get("project_path")
+            if not project_path:
+                raise ValueError("project_path is required for backup_project.")
+            result = self.project_guardian_snapshot(db, project_path, "mobile_remote_backup")
+        elif normalized == "run_automation":
+            automation_id = int(payload.get("automation_id", 0))
+            if not automation_id:
+                raise ValueError("automation_id is required for run_automation.")
+            automation = db.get(Automation, automation_id)
+            if not automation:
+                raise ValueError("Automation not found.")
+            result = {"automation_id": automation.id, "status": "accepted", "message": "Automation execution accepted for desktop engine evaluation."}
+        elif normalized == "open_website":
+            url = payload.get("url")
+            if not url:
+                raise ValueError("url is required for open_website.")
+            result = NotificationAgent(db).notify("Nexa Mobile Website Request", f"Open requested website: {url}", alert_type="mobile_command", module="mobile_gateway", action_buttons=["Open Website", "Dismiss"], metadata={"url": url, "device_id": device.id})
+        else:
+            raise ValueError("Unsupported mobile command.")
+        self._mobile_audit(db, device.id, "remote_command", command, "success", payload)
+        self.add_timeline_event(db, "automation", "Mobile command received", f"{device.device_name} requested {command}.", "mobile_gateway", metadata={"device_id": device.id, "command": command}, commit=False)
+        db.commit()
+        return {"status": "completed", "requires_approval": False, "result": result}
+
+    def mobile_sync_enqueue(self, db: Session, device: MobileDevice, item_type: str, operation: str, payload: dict, conflict_strategy: str = "desktop_wins") -> dict:
+        row = SyncQueue(device_id=device.id, item_type=item_type, operation=operation, payload_json=json.dumps(payload), conflict_strategy=conflict_strategy)
+        db.add(row)
+        self._mobile_audit(db, device.id, "sync_enqueued", operation, "pending", {"item_type": item_type})
+        db.commit()
+        db.refresh(row)
+        return self._mobile_sync_dict(row)
+
+    def mobile_sync_queue(self, db: Session, device: MobileDevice | None = None, status: str | None = None, limit: int = 100) -> list[dict]:
+        query = db.query(SyncQueue)
+        if device:
+            query = query.filter(SyncQueue.device_id == device.id)
+        if status:
+            query = query.filter(SyncQueue.status == status)
+        return [self._mobile_sync_dict(row) for row in query.order_by(SyncQueue.created_at.desc()).limit(limit).all()]
+
+    def mobile_notification_queue(self, db: Session, device: MobileDevice | None = None, status: str | None = None, limit: int = 100) -> list[dict]:
+        query = db.query(NotificationQueue)
+        if device:
+            query = query.filter(NotificationQueue.device_id.in_([device.id, None]))
+        if status:
+            query = query.filter(NotificationQueue.status == status)
+        return [self._mobile_notification_queue_dict(row) for row in query.order_by(NotificationQueue.created_at.desc()).limit(limit).all()]
 
     def mobile_summary(self, db: Session) -> dict:
         return {
@@ -1812,24 +2954,111 @@ class EvolutionService:
             "automations": AutomationEngine(db).list(),
             "timeline": self.search_timeline(db, limit=20),
             "activity": {"goals": self.list_goals(db), "achievements": self.list_achievements(db)},
+            "study": self.study_dashboard(db),
+            "college": self.college_dashboard(db),
+            "copilot": self._copilot_mobile_summary(db),
+            "health": self.self_health(db),
+            "mobile_gateway": {"trusted_devices": db.query(MobileDevice).filter(MobileDevice.status == "active").count(), "pending_sync": db.query(SyncQueue).filter(SyncQueue.status == "pending").count()},
             "daily_briefing": self.latest_briefing(db),
             "briefing_recommendations": self.briefing_recommendations(db, status="open", limit=10),
         }
 
+    def _copilot_mobile_summary(self, db: Session) -> dict:
+        dashboard = self.copilot_dashboard(db)
+        return {
+            "suggestions": dashboard["suggestions"][:10],
+            "warnings": dashboard["warnings"][:5],
+            "insights": dashboard["insights"][:5],
+            "quick_actions": dashboard["quick_actions"][:6],
+            "system_status": dashboard["system_status"],
+            "offline_ready": dashboard["offline_ready"],
+            "privacy": dashboard["privacy"],
+        }
+
     def mobile_api_docs(self) -> dict:
         return {
-            "authentication": "All mobile endpoints use the same API key dependency as the Nexa backend.",
+            "authentication": "Desktop-admin endpoints use the Nexa API key. Future Android clients pair with POST /api/mobile/pairing/start and /api/mobile/pairing/claim, then send Authorization: Bearer <access_token>.",
             "endpoints": {
+                "pairing_start": "POST /api/mobile/pairing/start",
+                "pairing_claim": "POST /api/mobile/pairing/claim",
+                "token_refresh": "POST /api/mobile/auth/refresh",
+                "devices": "GET/PATCH/DELETE /api/mobile/devices",
+                "dashboard": "GET /api/mobile/dashboard",
                 "summary": "GET /api/mobile/summary",
-                "battery": "GET /api/power-monitor/status",
-                "tasks": "GET /api/tasks",
-                "notifications": "GET /api/notifications",
-                "automations": "GET /api/automations",
-                "remote_command": "POST /api/commands",
-                "activity": "GET /api/evolution/timeline",
+                "battery": "GET /api/mobile/battery/status",
+                "tasks": "GET/POST/PATCH/DELETE /api/mobile/tasks",
+                "notifications": "GET/PATCH/DELETE /api/mobile/notifications",
+                "automations": "GET/POST/PATCH/DELETE /api/mobile/automations",
+                "goals": "GET/POST/PATCH/DELETE /api/mobile/goals",
+                "study": "GET /api/mobile/study/dashboard",
+                "college": "GET /api/mobile/college/dashboard",
+                "timeline": "GET /api/mobile/timeline",
+                "health": "GET /api/mobile/health/status",
+                "remote_command": "POST /api/mobile/commands",
+                "offline_sync": "GET/POST /api/mobile/sync",
             },
+            "security": {"high_risk_commands": ["shutdown", "restart", "delete_files", "credential_access", "system_modifications"], "execution_policy": "approval_required_on_desktop"},
             "android_app": "Not implemented; backend infrastructure is prepared.",
         }
+
+    def _mobile_default_permissions(self) -> list[str]:
+        return ["battery:read", "tasks:read", "tasks:write", "notifications:read", "notifications:write", "automations:read", "goals:read", "study:read", "college:read", "timeline:read", "health:read", "commands:limited", "sync:write"]
+
+    def _mobile_hash(self, value: str) -> str:
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    def _mobile_secret(self) -> bytes:
+        settings = get_settings()
+        return (settings.api_key or settings.database_url or "nexa-local-mobile-secret").encode("utf-8")
+
+    def _mobile_issue_jwt(self, device_id: int, token_type: str, ttl: timedelta) -> tuple[str, datetime]:
+        expires_at = datetime.utcnow() + ttl
+        payload = {"device_id": device_id, "typ": token_type, "exp": int(expires_at.timestamp()), "nonce": secrets.token_urlsafe(10)}
+        return self._mobile_sign_jwt(payload), expires_at
+
+    def _mobile_sign_jwt(self, payload: dict) -> str:
+        header = {"alg": "HS256", "typ": "JWT"}
+        encoded_header = self._mobile_b64(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+        encoded_payload = self._mobile_b64(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+        signing_input = f"{encoded_header}.{encoded_payload}".encode("utf-8")
+        signature = self._mobile_b64(hmac.new(self._mobile_secret(), signing_input, hashlib.sha256).digest())
+        return f"{encoded_header}.{encoded_payload}.{signature}"
+
+    def _mobile_decode_jwt(self, token: str) -> dict:
+        parts = token.split(".")
+        if len(parts) != 3:
+            raise ValueError("Invalid token format.")
+        signing_input = f"{parts[0]}.{parts[1]}".encode("utf-8")
+        expected = self._mobile_b64(hmac.new(self._mobile_secret(), signing_input, hashlib.sha256).digest())
+        if not hmac.compare_digest(expected, parts[2]):
+            raise ValueError("Invalid token signature.")
+        payload = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)).decode("utf-8"))
+        if int(payload.get("exp", 0)) < int(datetime.utcnow().timestamp()):
+            raise ValueError("Token expired.")
+        return payload
+
+    def _mobile_b64(self, value: bytes) -> str:
+        return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+    def _mobile_bearer_token(self, authorization: str) -> str:
+        if not authorization.lower().startswith("bearer "):
+            raise ValueError("Authorization bearer token required.")
+        return authorization.split(" ", 1)[1].strip()
+
+    def _mobile_audit(self, db: Session, device_id: int | None, event_type: str, action: str, status: str, detail: dict, ip_address: str = "") -> None:
+        db.add(MobileAuditLog(device_id=device_id, event_type=event_type, action=action, status=status, ip_address=ip_address, detail_json=json.dumps(detail)))
+
+    def _mobile_device_dict(self, row: MobileDevice) -> dict:
+        return {"id": row.id, "device_name": row.device_name, "device_type": row.device_type, "device_fingerprint": row.device_fingerprint, "status": row.status, "permissions": _loads(row.permissions_json, {}), "security_status": row.security_status, "last_active_at": _iso(row.last_active_at), "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat()}
+
+    def _mobile_audit_dict(self, row: MobileAuditLog) -> dict:
+        return {"id": row.id, "device_id": row.device_id, "event_type": row.event_type, "action": row.action, "status": row.status, "ip_address": row.ip_address, "detail": _loads(row.detail_json, {}), "created_at": row.created_at.isoformat()}
+
+    def _mobile_sync_dict(self, row: SyncQueue) -> dict:
+        return {"id": row.id, "device_id": row.device_id, "item_type": row.item_type, "operation": row.operation, "payload": _loads(row.payload_json, {}), "status": row.status, "retry_count": row.retry_count, "conflict_strategy": row.conflict_strategy, "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat(), "processed_at": _iso(row.processed_at)}
+
+    def _mobile_notification_queue_dict(self, row: NotificationQueue) -> dict:
+        return {"id": row.id, "device_id": row.device_id, "notification_id": row.notification_id, "event_type": row.event_type, "priority": row.priority, "payload": _loads(row.payload_json, {}), "status": row.status, "created_at": row.created_at.isoformat(), "delivered_at": _iso(row.delivered_at)}
 
     def _briefing_context(self, db: Session, settings: dict) -> dict:
         now = datetime.utcnow()
@@ -1866,6 +3095,8 @@ class EvolutionService:
         goals = self.list_goals(db)
         achievements = self.list_achievements(db)[:5]
         college_updates = self.list_college_updates(db, limit=10)
+        college_dashboard = self.college_dashboard(db)
+        copilot_summary = self._copilot_mobile_summary(db)
         attendance_alerts = [item for item in college_updates if "attendance" in (item.get("update_type", "") + item.get("title", "")).lower()]
         website_profiles = db.query(WebsiteProfile).filter(WebsiteProfile.monitoring_enabled.is_(True)).all()
         unread_notifications = db.query(Notification).filter(Notification.read.is_(False)).count()
@@ -1873,6 +3104,7 @@ class EvolutionService:
         notifications = db.query(Notification).order_by(Notification.created_at.desc()).limit(100).all()
         website_alerts = [row.title for row in notifications if "website" in row.alert_type.lower() or "website" in row.module.lower()][:5]
         automation_alerts = [row.title for row in notifications if "automation" in row.alert_type.lower() or "automation" in row.module.lower()][:5]
+        automation_dashboard = AutomationEngine(db).dashboard()
         task_reminders = [row.title for row in notifications if "reminder" in row.alert_type.lower() or "reminder" in row.category.lower()][:5]
         system_warnings = [row.title for row in notifications if row.severity in {"high", "critical"}][:5]
         battery_alerts = [row.title for row in notifications if "battery" in row.alert_type.lower() or "battery" in row.module.lower()][:5]
@@ -1884,6 +3116,9 @@ class EvolutionService:
         screenshot_errors = db.query(ErrorAnalysis).filter(ErrorAnalysis.created_at >= yesterday_start).order_by(ErrorAnalysis.created_at.desc()).limit(5).all()
         screenshot_documents = db.query(DocumentSummary).filter(DocumentSummary.created_at >= yesterday_start).order_by(DocumentSummary.created_at.desc()).limit(5).all()
         screenshot_actions = db.query(ScreenshotAction).filter(ScreenshotAction.created_at >= yesterday_start).order_by(ScreenshotAction.created_at.desc()).limit(10).all()
+        recovery_reports = db.query(CrashReport).filter(CrashReport.created_at >= yesterday_start).order_by(CrashReport.created_at.desc()).limit(5).all()
+        recovery_sessions = db.query(RecoverySession).filter(RecoverySession.status == "captured").order_by(RecoverySession.started_at.desc()).limit(5).all()
+        recovery_incidents = db.query(IncidentReport).filter(IncidentReport.created_at >= yesterday_start).order_by(IncidentReport.created_at.desc()).limit(5).all()
         active_events = db.query(Task).filter(Task.status.in_(["created", "running", "pending_confirmation"])).count()
         goal_average = round(sum(goal["progress_percent"] for goal in goals) / max(len(goals), 1), 2) if goals else 0
         system_health = self._briefing_system_health()
@@ -1915,15 +3150,27 @@ class EvolutionService:
                 "recommended_topics": missed_topics[:3],
             },
             "college": {
+                "summary": college_dashboard["summary"],
                 "attendance_updates": attendance_alerts,
-                "internal_marks": [item for item in college_updates if "mark" in item["title"].lower()],
-                "results": [item for item in college_updates if "result" in item["title"].lower()],
-                "announcements": [item for item in college_updates if "announcement" in item["title"].lower()],
-                "fees": [item for item in college_updates if "fee" in item["title"].lower()],
-                "timetable_changes": [item for item in college_updates if "timetable" in item["title"].lower()],
+                "internal_marks": college_dashboard["marks"] or [item for item in college_updates if "mark" in item["title"].lower()],
+                "results": college_dashboard["results"] or [item for item in college_updates if "result" in item["title"].lower()],
+                "announcements": college_dashboard["announcements"] or [item for item in college_updates if "announcement" in item["title"].lower()],
+                "fees": college_dashboard["fees"] or [item for item in college_updates if "fee" in item["title"].lower()],
+                "timetable_changes": college_dashboard["timetables"] or [item for item in college_updates if "timetable" in item["title"].lower()],
+                "assignments": college_dashboard["assignments"],
+                "recommendations": college_dashboard["recommendations"],
                 "contineo_alerts": [item for item in college_updates if "contineo" in item["source"].lower()],
-                "kcet_alerts": [item for item in college_updates if "kcet" in item["source"].lower()],
+                "kcet_alerts": college_dashboard["kcet"] or [item for item in college_updates if "kcet" in item["source"].lower()],
                 "website_monitoring_alerts": website_alerts,
+            },
+            "copilot": {
+                "top_recommendations": copilot_summary["suggestions"][:5],
+                "warnings": copilot_summary["warnings"],
+                "insights": copilot_summary["insights"],
+                "quick_actions": copilot_summary["quick_actions"],
+                "system_status": copilot_summary["system_status"],
+                "offline_ready": copilot_summary["offline_ready"],
+                "privacy": copilot_summary["privacy"],
             },
             "goals": {"items": goals, "average_percent": goal_average, "achievements": achievements},
             "notifications": {
@@ -1934,6 +3181,15 @@ class EvolutionService:
                 "task_reminders": task_reminders,
                 "system_warnings": system_warnings,
                 "battery_alerts": battery_alerts,
+            },
+            "automations": {
+                "active": len(automation_dashboard["active"]),
+                "paused": len(automation_dashboard["paused"]),
+                "failed": len(automation_dashboard["failed"]),
+                "recent_executions": automation_dashboard["recent_executions"][:5],
+                "statistics": automation_dashboard["statistics"],
+                "recommendations": ["Review failed automations."] if automation_dashboard["failed"] else ["Automation system is healthy."],
+                "pending_approvals": automation_dashboard["statistics"].get("pending_approvals", 0),
             },
             "downloads": {
                 "yesterday_count": len(downloads_yesterday),
@@ -1952,6 +3208,13 @@ class EvolutionService:
                 "notes_generated": [self._screenshot_action_dict(item) for item in screenshot_actions if item.action_type in {"save_notes", "create_study_task"}],
                 "learning_insights": [item.summary for item in screenshot_documents[:3]],
             },
+            "recovery": {
+                "recent_reports": [self._crash_report_dict(item) for item in recovery_reports],
+                "open_sessions": [self._recovery_session_dict(item) for item in recovery_sessions],
+                "incident_reports": [self._incident_report_dict(item) for item in recovery_incidents],
+                "recommendations": self.recovery_recommendations(db),
+                "status": "attention_needed" if recovery_reports or recovery_sessions else "ready",
+            },
             "weather": self._weather_summary(settings.get("weather_location", "")),
             "website_alerts": len(website_profiles),
             "events": active_events,
@@ -1969,10 +3232,13 @@ class EvolutionService:
             {"id": "coding", "title": "Coding Summary", "priority": 80 if context["coding"]["yesterday_seconds"] >= 7200 else 35, "data": context["coding"]},
             {"id": "tasks", "title": "Today's Tasks", "priority": 75 if context["todays_tasks"] else 30, "data": context["todays_tasks"]},
             {"id": "college", "title": "College Companion", "priority": 70 if context["college"]["website_monitoring_alerts"] else 25, "data": context["college"]},
+            {"id": "copilot", "title": "AI Copilot", "priority": 88 if context["copilot"]["warnings"] or context["copilot"]["top_recommendations"] else 24, "data": context["copilot"]},
             {"id": "goals", "title": "Goal Progress", "priority": 60 if context["goals"]["items"] else 20, "data": context["goals"]},
             {"id": "notifications", "title": "Notifications", "priority": 65 if context["notifications"]["unread"] else 20, "data": context["notifications"]},
+            {"id": "automations", "title": "Automations", "priority": 68 if context["automations"]["failed"] or context["automations"]["pending_approvals"] else 22, "data": context["automations"]},
             {"id": "downloads", "title": "Downloads", "priority": 62 if context["downloads"]["cleanup_suggestions"] or context["downloads"]["duplicates"] else 18, "data": context["downloads"]},
             {"id": "screenshots", "title": "Screenshot Assistant", "priority": 64 if context["screenshots"]["errors_solved"] or context["screenshots"]["documents_analyzed"] else 18, "data": context["screenshots"]},
+            {"id": "recovery", "title": "Emergency Recovery", "priority": 92 if context["recovery"]["recent_reports"] or context["recovery"]["open_sessions"] else 18, "data": context["recovery"]},
             {"id": "weather", "title": "Weather", "priority": 15 if context["weather"]["status"] == "offline" else 35, "data": context["weather"]},
             {"id": "system", "title": "System Health", "priority": 55 if context["system_health"]["health_score"] < 80 else 20, "data": context["system_health"]},
         ]
@@ -1990,14 +3256,27 @@ class EvolutionService:
             recommendations.append({"type": "study_revision", "priority": "medium", "title": "Revise missed topics", "message": f"Recommended topics: {', '.join(context['study']['recommended_topics'])}.", "action": {"target": "study"}})
         if context["notifications"]["pending_approvals"]:
             recommendations.append({"type": "approval", "priority": "medium", "title": "Pending approvals", "message": f"{context['notifications']['pending_approvals']} approval(s) are waiting.", "action": {"target": "approvals"}})
+        if context["automations"]["failed"] or context["automations"]["pending_approvals"]:
+            recommendations.append({"type": "automation", "priority": "medium", "title": "Review automations", "message": f"{context['automations']['failed']} failed automation(s), {context['automations']['pending_approvals']} pending approval(s).", "action": {"target": "automations"}})
         if context["downloads"]["duplicates"] or context["downloads"]["cleanup_suggestions"]:
             recommendations.append({"type": "downloads", "priority": "medium", "title": "Review Downloads cleanup", "message": f"{len(context['downloads']['cleanup_suggestions'])} cleanup suggestion(s) and {len(context['downloads']['duplicates'])} duplicate(s) are waiting.", "action": {"target": "downloads"}})
         if context["screenshots"]["errors_solved"]:
             recommendations.append({"type": "screenshot_error", "priority": "medium", "title": "Review captured errors", "message": f"{len(context['screenshots']['errors_solved'])} screenshot error analysis item(s) are available.", "action": {"target": "screenshots"}})
+        if context["recovery"]["recent_reports"] or context["recovery"]["open_sessions"]:
+            recommendations.append({"type": "emergency_recovery", "priority": "high", "title": "Review recovery status", "message": f"{len(context['recovery']['recent_reports'])} recovery report(s) and {len(context['recovery']['open_sessions'])} captured session(s) need review.", "action": {"target": "recovery"}})
         if context["goals"]["items"] and context["goals"]["average_percent"] < 50:
             recommendations.append({"type": "goal", "priority": "medium", "title": "Goals need progress", "message": "Average goal progress is below 50%.", "action": {"target": "goals"}})
         if context["college"]["attendance_updates"]:
             recommendations.append({"type": "attendance", "priority": "high", "title": "Attendance alert", "message": "Review attendance updates from College Companion.", "action": {"target": "college"}})
+        if context["copilot"]["warnings"] or context["copilot"]["top_recommendations"]:
+            top = (context["copilot"]["warnings"] or context["copilot"]["top_recommendations"])[0]
+            recommendations.append({
+                "type": "copilot",
+                "priority": top.get("severity", "medium"),
+                "title": top.get("title", "Review Copilot recommendation"),
+                "message": top.get("message", "Nexa Copilot has a context-aware recommendation."),
+                "action": {"target": "copilot"},
+            })
         if not recommendations:
             recommendations.append({"type": "secretary", "priority": "low", "title": "Plan looks clear", "message": "No urgent issues detected. Review tasks and keep the day focused.", "action": {"target": "dashboard"}})
         return recommendations
@@ -2218,11 +3497,202 @@ class EvolutionService:
             recommendations.append({"type": "baseline", "message": "Session complete. Keep blockers enabled for the next session."})
         return recommendations
 
-    def _create_suggestion(self, db: Session, suggestion_type: str, title: str, message: str, severity: str, action: dict) -> dict:
-        row = CopilotSuggestion(suggestion_type=suggestion_type, title=title, message=message, severity=severity, action_json=json.dumps(action), module="copilot_engine")
+    def _copilot_context(self, db: Session) -> dict:
+        now = datetime.utcnow()
+        today_start = datetime.combine(date.today(), datetime.min.time())
+        yesterday_start = today_start - timedelta(days=1)
+        power = power_monitor_service.get_status()
+        resource = resource_manager_service.get_status()
+        latest_activity = db.query(ActivityLog).order_by(ActivityLog.created_at.desc()).first()
+        active_focus = db.query(FocusSession).filter(FocusSession.status.in_(["active", "paused"])).order_by(FocusSession.started_at.desc()).first()
+        coding_today = db.query(CodingSession).filter(CodingSession.started_at >= today_start).all()
+        coding_yesterday = db.query(CodingSession).filter(CodingSession.started_at >= yesterday_start, CodingSession.started_at < today_start).all()
+        study_dashboard = self.study_dashboard(db)
+        college_dashboard = self.college_dashboard(db)
+        goal_dashboard = self.goal_dashboard(db)
+        health = self.self_health(db)
+        latest_project = db.query(ProjectHealth).order_by(ProjectHealth.created_at.desc()).first()
+        latest_error = db.query(TimelineEvent).filter((TimelineEvent.title.ilike("%error%")) | (TimelineEvent.description.ilike("%error%")) | (TimelineEvent.event_type == "coding_error")).order_by(TimelineEvent.created_at.desc()).first()
+        active_tasks = db.query(Task).filter(Task.status.in_(["created", "pending_confirmation", "running"])).order_by(Task.created_at.desc()).limit(25).all()
+        notifications_unread = db.query(Notification).filter(Notification.read.is_(False)).count()
+        automation_dashboard = AutomationEngine(db).dashboard()
+        activity_type = self._copilot_activity_type(latest_activity, active_focus, latest_error)
+        priority_context = self._copilot_priority(power, health, active_tasks, college_dashboard, goal_dashboard)
+        return {
+            "captured_at": now.isoformat(),
+            "priority_context": priority_context,
+            "activity": {
+                "type": activity_type,
+                "latest": {"activity_type": latest_activity.activity_type, "app_name": latest_activity.app_name, "project": latest_activity.project, "window_title": _loads(latest_activity.detail_json, {}).get("window_title", ""), "created_at": latest_activity.created_at.isoformat()} if latest_activity else {},
+                "idle": not latest_activity or (now - latest_activity.created_at).total_seconds() > 1800,
+                "coding_today_seconds": sum(item.duration_seconds for item in coding_today),
+                "coding_yesterday_seconds": sum(item.duration_seconds for item in coding_yesterday),
+            },
+            "battery": power,
+            "resource": resource,
+            "focus": self._focus_dict(active_focus) if active_focus else None,
+            "study": study_dashboard,
+            "college": college_dashboard,
+            "goals": goal_dashboard,
+            "tasks": [{"id": task.id, "command": task.command, "status": task.status, "plan": _loads(task.plan_json, {})} for task in active_tasks],
+            "notifications": {"unread": notifications_unread},
+            "automations": automation_dashboard,
+            "health": health,
+            "project": self._project_health_dict(latest_project) if latest_project else None,
+            "coding_error": self._timeline_dict(latest_error) if latest_error else None,
+            "privacy": {"mode": self.get_copilot_settings(db)["privacy_mode"], "cloud_upload": False, "local_processing": True},
+        }
+
+    def _copilot_candidates(self, db: Session, context: dict, settings: dict) -> list[dict]:
+        modules = settings.get("modules", {})
+        candidates: list[dict] = []
+        battery = context["battery"].get("battery_percent")
+        charging = context["battery"].get("is_charging")
+        if modules.get("battery", True) and isinstance(battery, (int, float)):
+            if battery <= 10 and not charging:
+                candidates.append(self._copilot_candidate("battery", "Critical battery level", f"Battery is {battery}% and the laptop is not charging. Connect the charger immediately.", "critical", "battery", {"type": "open", "target": "battery"}))
+            elif battery <= 20 and not charging:
+                candidates.append(self._copilot_candidate("battery", "Battery needs attention", f"Battery is {battery}% and the charger is disconnected.", "high", "battery", {"type": "open", "target": "battery"}))
+            elif battery >= 95 and charging:
+                candidates.append(self._copilot_candidate("battery_health", "Battery near full", "Battery is above 95%. Consider unplugging to reduce battery wear.", "medium", "battery", {"type": "open", "target": "battery"}))
+        if modules.get("health", True):
+            health_score = context["health"].get("health_score", 100)
+            if health_score < 60:
+                candidates.append(self._copilot_candidate("health", "Nexa needs optimization", f"Nexa health score is {health_score}%. Review resource and error recommendations.", "high", "self_health", {"type": "open", "target": "resources"}))
+            if context["resource"].get("mode") in {"thermal_protection", "load_shedding", "power_saving"}:
+                candidates.append(self._copilot_candidate("resource", "Reduce background activity", "Resource Manager is throttling non-critical work. Delay heavy automations until the system cools down.", "medium", "resource_manager", {"type": "open", "target": "resources"}))
+        if modules.get("coding", True) and context.get("coding_error"):
+            error = context["coding_error"]
+            candidates.append(self._copilot_candidate("coding_error", "Coding issue detected", f"{error['title']}: Nexa can explain the likely cause and create a fix task.", "medium", "coding_copilot", {"type": "open", "target": "coding", "timeline_event_id": error["id"]}))
+        if modules.get("study", True):
+            focus = context.get("focus")
+            if focus and focus.get("mode") in {"study", "focus"} and int(focus.get("duration_seconds") or 0) >= 7200:
+                candidates.append(self._copilot_candidate("study_break", "Long study session detected", "You have been focused for about 2 hours. Take a short break before continuing.", "medium", "study_copilot", {"type": "start_break", "target": "focus"}))
+            for exam in context["study"].get("exam_countdowns", [])[:3]:
+                if exam.get("days_remaining") is not None and exam["days_remaining"] <= 5:
+                    candidates.append(self._copilot_candidate("exam", f"{exam['subject']} exam is close", f"{exam['days_remaining']} day(s) remaining. Prioritize revision and practice.", "high", "study_copilot", {"type": "open", "target": "study"}))
+        if modules.get("college", True):
+            for item in context["college"].get("recommendations", [])[:3]:
+                priority = "high" if item.get("priority") == "high" else "medium"
+                candidates.append(self._copilot_candidate("college", item.get("title", "College update needs attention"), item.get("message", "Review College Companion updates."), priority, "college_copilot", {"type": "open", "target": "college"}))
+        if modules.get("goals", True):
+            for item in context["goals"].get("recommendations", [])[:3]:
+                candidates.append(self._copilot_candidate("goal", item.get("title", "Goal needs progress"), item.get("message", "Review goal progress and next action."), item.get("priority", "medium"), "goal_copilot", {"type": "open", "target": "goals"}))
+        if modules.get("project", True) and context.get("project"):
+            project = context["project"]
+            if project.get("risk_level") in {"high", "critical"} or project.get("backup_age_hours", 0) >= 24:
+                candidates.append(self._copilot_candidate("project_backup", "Project backup recommended", "Project Guardian detected backup or Git risk. Create a snapshot before continuing.", "high", "project_copilot", {"type": "open", "target": "guardian", "project_id": project.get("project_id")}))
+        if context["tasks"]:
+            deadline_tasks = [task for task in context["tasks"] if "assignment" in task["command"].lower() or "tomorrow" in task["command"].lower() or "due" in task["command"].lower()]
+            if deadline_tasks:
+                candidates.append(self._copilot_candidate("deadline", "Deadline needs attention", f"{len(deadline_tasks)} task(s) look deadline-sensitive. Review assignments and reminders.", "high", "task_copilot", {"type": "open", "target": "tasks", "task_ids": [task["id"] for task in deadline_tasks]}))
+        if context["automations"].get("failed"):
+            candidates.append(self._copilot_candidate("automation", "Automation failures detected", "One or more automations failed recently. Review history before depending on them.", "medium", "automation_copilot", {"type": "open", "target": "automation"}))
+        return candidates[:12]
+
+    def _copilot_candidate(self, suggestion_type: str, title: str, message: str, severity: str, module: str, action: dict, metadata: dict | None = None) -> dict:
+        return {"type": suggestion_type, "title": title, "message": message, "severity": severity, "module": module, "action": action, "metadata": metadata or {}}
+
+    def _copilot_activity_type(self, latest_activity: ActivityLog | None, active_focus: FocusSession | None, latest_error: TimelineEvent | None) -> str:
+        if latest_error and (datetime.utcnow() - latest_error.created_at).total_seconds() < 3600:
+            return "coding_error"
+        if active_focus:
+            return active_focus.mode or "focus"
+        if not latest_activity:
+            return "idle"
+        lower = f"{latest_activity.activity_type} {latest_activity.app_name} {latest_activity.project}".lower()
+        if any(term in lower for term in ["code", "cursor", "terminal", "git", "coding"]):
+            return "coding"
+        if any(term in lower for term in ["study", "pdf", "notes", "exam"]):
+            return "study"
+        if any(term in lower for term in ["browser", "chrome", "edge", "website"]):
+            return "browsing"
+        if any(term in lower for term in ["game", "steam"]):
+            return "gaming"
+        return latest_activity.activity_type or "active"
+
+    def _copilot_priority(self, power: dict, health: dict, tasks: list[Task], college: dict, goals: dict) -> str:
+        battery = power.get("battery_percent")
+        if isinstance(battery, (int, float)) and battery <= 10 and not power.get("is_charging"):
+            return "critical"
+        if health.get("health_score", 100) < 50:
+            return "critical"
+        if any("assignment" in task.command.lower() or "tomorrow" in task.command.lower() for task in tasks):
+            return "high"
+        if college.get("recommendations") or goals.get("recommendations"):
+            return "medium"
+        return "normal"
+
+    def _create_suggestion(self, db: Session, suggestion_type: str, title: str, message: str, severity: str, action: dict, module: str = "copilot_engine", metadata: dict | None = None) -> dict:
+        existing = (
+            db.query(CopilotSuggestion)
+            .filter(CopilotSuggestion.suggestion_type == suggestion_type, CopilotSuggestion.title == title, CopilotSuggestion.status == "open", CopilotSuggestion.created_at >= datetime.utcnow() - timedelta(minutes=30))
+            .order_by(CopilotSuggestion.created_at.desc())
+            .first()
+        )
+        if existing:
+            return self._suggestion_dict(existing)
+        row = CopilotSuggestion(suggestion_type=suggestion_type, title=title, message=message, severity=severity, action_json=json.dumps(action), module=module)
         db.add(row)
         db.flush()
+        if severity in {"high", "critical"}:
+            db.add(CopilotWarning(warning_type=suggestion_type, module=module, title=title, message=message, severity=severity, metadata_json=json.dumps(metadata or {}, default=str)))
+        db.add(CopilotAction(suggestion_id=row.id, action_type=action.get("type", "open"), title=title, payload_json=json.dumps(action, default=str)))
+        db.add(CopilotHistory(event_type="suggestion_created", suggestion_id=row.id, title=title, detail_json=json.dumps({"severity": severity, "module": module, "metadata": metadata or {}}, default=str)))
+        self.add_timeline_event(db, "copilot", title, message, "copilot_engine", metadata={"suggestion_id": row.id, "severity": severity}, commit=False)
         return self._suggestion_dict(row)
+
+    def _record_copilot_insights(self, db: Session, context: dict) -> None:
+        insights: list[tuple[str, str, str, str, str]] = []
+        coding_today = context["activity"].get("coding_today_seconds", 0)
+        coding_yesterday = context["activity"].get("coding_yesterday_seconds", 0)
+        if coding_yesterday and coding_today > coding_yesterday * 1.2:
+            insights.append(("coding_trend", "Coding momentum increased", "Coding time is up compared with yesterday.", "Keep one focused session for the highest-priority project.", "low"))
+        if context["study"].get("summary", {}).get("active_plans", 0) and not context["focus"]:
+            insights.append(("study_planning", "Study plan is ready", "A study plan is active but no focus session is running.", "Start a study focus session when ready.", "low"))
+        if context["goals"].get("summary", {}).get("active", 0) and context["goals"].get("summary", {}).get("average_progress", 100) < 50:
+            insights.append(("goal_progress", "Goal progress is behind", "Average goal progress is below 50%.", "Pick one goal and complete the next small step today.", "medium"))
+        if not insights:
+            insights.append(("baseline", "Copilot context captured", "Nexa has refreshed local context and found no unusual trend.", "Keep working; Copilot will notify only when useful.", "low"))
+        for insight_type, title, message, recommendation, severity in insights:
+            exists = db.query(CopilotInsight).filter(CopilotInsight.insight_type == insight_type, CopilotInsight.title == title, CopilotInsight.created_at >= datetime.utcnow() - timedelta(hours=12)).first()
+            if not exists:
+                db.add(CopilotInsight(insight_type=insight_type, title=title, message=message, recommendation=recommendation, severity=severity, metadata_json=json.dumps({"activity_type": context["activity"]["type"]}, default=str)))
+
+    def _record_copilot_analytics(self, db: Session, generated: int) -> None:
+        key = date.today().isoformat()
+        row = db.query(CopilotAnalytics).filter(CopilotAnalytics.analytics_date == key).one_or_none()
+        if not row:
+            row = CopilotAnalytics(analytics_date=key)
+            db.add(row)
+        row.suggestions_generated = int(row.suggestions_generated or 0) + generated
+        row.suggestions_acted = db.query(CopilotSuggestion).filter(CopilotSuggestion.status == "acted").count()
+        row.warnings_open = db.query(CopilotWarning).filter(CopilotWarning.status == "open").count()
+        row.critical_count = db.query(CopilotSuggestion).filter(CopilotSuggestion.severity == "critical", CopilotSuggestion.created_at >= datetime.combine(date.today(), datetime.min.time())).count()
+        row.helpful_score = max(0, min(100, 100 - row.warnings_open * 5 + row.suggestions_acted * 2))
+        row.metadata_json = json.dumps({"offline_ready": True, "local_processing": True}, default=str)
+        row.updated_at = datetime.utcnow()
+
+    def _copilot_quick_actions(self, suggestions: list[dict]) -> list[dict]:
+        actions = [{"id": "refresh_context", "label": "Refresh Context", "action": {"type": "evaluate_copilot"}}]
+        targets = {item.get("action", {}).get("target") for item in suggestions}
+        if "focus" in targets or any(item["suggestion_type"] in {"study_break", "focus"} for item in suggestions):
+            actions.append({"id": "start_focus", "label": "Start Focus Mode", "action": {"type": "start_focus"}})
+        if "guardian" in targets:
+            actions.append({"id": "backup_project", "label": "Backup Project", "action": {"type": "open", "target": "guardian"}})
+        if "resources" in targets:
+            actions.append({"id": "optimize_nexa", "label": "Optimize Nexa", "action": {"type": "open", "target": "resources"}})
+        if "college" in targets:
+            actions.append({"id": "check_college", "label": "Check College", "action": {"type": "open", "target": "college"}})
+        if "study" in targets:
+            actions.append({"id": "launch_study_plan", "label": "Launch Study Plan", "action": {"type": "open", "target": "study"}})
+        return actions[:8]
+
+    def _copilot_system_status(self, suggestions: list[dict], warnings: list[dict]) -> dict:
+        critical = sum(1 for item in suggestions if item["severity"] == "critical") + sum(1 for item in warnings if item["severity"] == "critical" and item["status"] == "open")
+        high = sum(1 for item in suggestions if item["severity"] == "high")
+        status = "critical" if critical else "attention" if high else "ready"
+        return {"status": status, "critical": critical, "high": high, "message": "Critical recommendations require action." if critical else "Copilot is monitoring local context."}
 
     def _unlock_achievement(self, db: Session, title: str, badge: str, description: str, metadata: dict) -> None:
         existing = db.query(Achievement).filter(Achievement.title == title).one_or_none()
@@ -2975,6 +4445,127 @@ class EvolutionService:
     def _record_project_event(self, db: Session, project_id: int | None, event_type: str, title: str, message: str = "", severity: str = "low", metadata: dict | None = None) -> None:
         db.add(ProjectEvent(project_id=project_id, event_type=event_type, title=title, message=message, severity=severity, metadata_json=json.dumps(metadata or {}, default=str)))
 
+    def _capture_recovery_session_row(self, db: Session, session_type: str, applications: list[dict], project_path: str | None = None, commit: bool = True) -> RecoverySession:
+        root = Path(project_path).expanduser().resolve() if project_path else Path.cwd()
+        workspace_state = {
+            "workspace_path": str(root),
+            "captured_at": datetime.utcnow().isoformat(),
+            "applications": applications,
+            "git_status": self.git_status(str(root)) if root.exists() else {"is_git_repo": False},
+            "tasks_active": db.query(Task).filter(Task.status.in_(["created", "running", "pending_confirmation"])).count(),
+        }
+        restore_plan = []
+        normalized_apps = applications or [{"name": "Workspace", "process": "", "workspace_path": str(root)}]
+        for item in normalized_apps:
+            app_name = item.get("name") or item.get("app_name") or "Workspace"
+            app_workspace = item.get("workspace_path") or str(root)
+            restore_command = self._restore_command_for_application(app_name, app_workspace)
+            restore_plan.append({"application": app_name, "workspace_path": app_workspace, "command": restore_command, "requires_user_review": True})
+        session = RecoverySession(session_type=session_type, workspace_state_json=json.dumps(workspace_state, default=str), restore_plan_json=json.dumps(restore_plan, default=str), metadata_json=json.dumps({"project_path": str(root), "offline_ready": True}, default=str))
+        db.add(session)
+        db.flush()
+        for item in normalized_apps:
+            app_name = item.get("name") or item.get("app_name") or "Workspace"
+            workspace_path = item.get("workspace_path") or str(root)
+            db.add(
+                RecoveredApplication(
+                    session_id=session.id,
+                    app_name=app_name,
+                    process_name=item.get("process") or item.get("process_name") or self._process_for_application(app_name),
+                    workspace_path=workspace_path,
+                    open_files_json=json.dumps(item.get("open_files", []), default=str),
+                    terminal_state_json=json.dumps(item.get("terminal") or item.get("terminal_state") or {}, default=str),
+                    restore_command=self._restore_command_for_application(app_name, workspace_path),
+                    metadata_json=json.dumps(item, default=str),
+                )
+            )
+        db.add(RecoveryHistory(event_type="session_captured", title="Recovery session captured", message=f"Captured {session_type} recovery state.", metadata_json=json.dumps({"session_id": session.id, "project_path": str(root)}, default=str)))
+        if commit:
+            db.commit()
+            db.refresh(session)
+        return session
+
+    def _record_recovery_event(self, db: Session, event_type: str, title: str, message: str, severity: str = "medium", metadata: dict | None = None) -> None:
+        db.add(RecoveryEvent(event_type=event_type, title=title, message=message, severity=severity, metadata_json=json.dumps(metadata or {}, default=str)))
+        db.add(RecoveryHistory(event_type=event_type, title=title, message=message, status="recorded", metadata_json=json.dumps(metadata or {}, default=str)))
+        self._write_recovery_log("system_events.log", f"{event_type}: {title} - {message}")
+
+    def _application_from_crash_type(self, crash_type: str) -> str:
+        lowered = crash_type.lower()
+        if "vscode" in lowered or "vs_code" in lowered:
+            return "VS Code"
+        if "cursor" in lowered:
+            return "Cursor"
+        if "terminal" in lowered:
+            return "Terminal"
+        if "bsod" in lowered or "power" in lowered or "shutdown" in lowered:
+            return "Windows"
+        if "nexa" in lowered:
+            return "Nexa"
+        return ""
+
+    def _process_for_application(self, application: str) -> str:
+        lookup = {"vs code": "Code.exe", "vscode": "Code.exe", "cursor": "Cursor.exe", "terminal": "WindowsTerminal.exe", "windows": "System", "nexa": "Nexa.exe"}
+        return lookup.get(application.lower(), "")
+
+    def _restore_command_for_application(self, application: str, workspace_path: str) -> str:
+        lower = application.lower()
+        if "code" in lower:
+            return f'code "{workspace_path}"'
+        if "cursor" in lower:
+            return f'cursor "{workspace_path}"'
+        if "terminal" in lower:
+            return f'wt -d "{workspace_path}"'
+        if application == "Workspace":
+            return f'open "{workspace_path}"'
+        return ""
+
+    def _recovery_recommendations_for(self, crash_type: str, application: str) -> list[str]:
+        recommendations = ["Review the recovery dashboard before reopening sensitive files.", "Create or refresh Project Guardian snapshots for active projects."]
+        if application.lower() in {"vs code", "cursor"}:
+            recommendations.append("Reopen the captured workspace and check Git status before continuing.")
+        if "power" in crash_type.lower() or "bsod" in crash_type.lower() or "shutdown" in crash_type.lower():
+            recommendations.append("Check Windows reliability history and battery/power events.")
+        if application.lower() == "terminal":
+            recommendations.append("Review recent terminal commands before retrying failed operations.")
+        return recommendations
+
+    def _write_recovery_log(self, file_name: str, message: str) -> None:
+        stamp = datetime.utcnow().isoformat()
+        for root in (Path("logs"), Path("backend/logs")):
+            try:
+                root.mkdir(parents=True, exist_ok=True)
+                with (root / file_name).open("a", encoding="utf-8") as handle:
+                    handle.write(f"{stamp} {message}\n")
+            except OSError:
+                logger.exception("Failed to write recovery log")
+
+    def _extract_number(self, text: str, default: int) -> int:
+        match = re.search(r"(\d+)", text)
+        return int(match.group(1)) if match else default
+
+    def _extract_minutes(self, text: str, default: int) -> int:
+        match = re.search(r"(\d+)\s*(minute|minutes|min|mins)", text)
+        if match:
+            return int(match.group(1))
+        if "hour" in text:
+            hour = re.search(r"(\d+)\s*(hour|hours)", text)
+            return int(hour.group(1)) * 60 if hour else default
+        return default
+
+    def _setting_value(self, db: Session, key: str, default: str = "") -> str:
+        row = db.query(Setting).filter(Setting.key == key).first()
+        return row.value if row else default
+
+    def _set_setting_value(self, db: Session, key: str, value: str) -> None:
+        row = db.query(Setting).filter(Setting.key == key).first()
+        if row is None:
+            row = Setting(key=key, value=value)
+            db.add(row)
+        else:
+            row.value = value
+            row.updated_at = datetime.utcnow()
+
     def _project_dict(self, row: Project) -> dict:
         return {"id": row.id, "name": row.name, "path": row.path, "project_type": row.project_type, "git_branch": row.git_branch, "commit_hash": row.commit_hash, "last_backup_at": _iso(row.last_backup_at), "health_score": row.health_score, "status": row.status, "metadata": _loads(row.metadata_json, {}), "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat()}
 
@@ -2992,6 +4583,24 @@ class EvolutionService:
 
     def _project_event_dict(self, row: ProjectEvent) -> dict:
         return {"id": row.id, "project_id": row.project_id, "event_type": row.event_type, "title": row.title, "message": row.message, "severity": row.severity, "metadata": _loads(row.metadata_json, {}), "created_at": row.created_at.isoformat()}
+
+    def _crash_report_dict(self, row: CrashReport) -> dict:
+        return {"id": row.id, "crash_type": row.crash_type, "source": row.source, "application": row.application, "severity": row.severity, "message": row.message, "stack_trace": row.stack_trace, "diagnostics": _loads(row.diagnostics_json, {}), "status": row.status, "created_at": row.created_at.isoformat(), "resolved_at": _iso(row.resolved_at)}
+
+    def _recovery_event_dict(self, row: RecoveryEvent) -> dict:
+        return {"id": row.id, "event_type": row.event_type, "source": row.source, "title": row.title, "message": row.message, "severity": row.severity, "metadata": _loads(row.metadata_json, {}), "created_at": row.created_at.isoformat()}
+
+    def _recovery_session_dict(self, row: RecoverySession) -> dict:
+        return {"id": row.id, "session_type": row.session_type, "status": row.status, "started_at": row.started_at.isoformat(), "ended_at": _iso(row.ended_at), "workspace_state": _loads(row.workspace_state_json, {}), "restore_plan": _loads(row.restore_plan_json, []), "restored_items": _loads(row.restored_items_json, []), "metadata": _loads(row.metadata_json, {})}
+
+    def _incident_report_dict(self, row: IncidentReport) -> dict:
+        return {"id": row.id, "incident_type": row.incident_type, "title": row.title, "summary": row.summary, "applications_affected": _loads(row.applications_affected_json, []), "recovery_actions": _loads(row.recovery_actions_json, []), "recovered_items": _loads(row.recovered_items_json, []), "errors": _loads(row.errors_json, []), "recommendations": _loads(row.recommendations_json, []), "status": row.status, "created_at": row.created_at.isoformat(), "resolved_at": _iso(row.resolved_at)}
+
+    def _recovered_application_dict(self, row: RecoveredApplication) -> dict:
+        return {"id": row.id, "session_id": row.session_id, "app_name": row.app_name, "process_name": row.process_name, "workspace_path": row.workspace_path, "open_files": _loads(row.open_files_json, []), "terminal_state": _loads(row.terminal_state_json, {}), "restore_command": row.restore_command, "status": row.status, "metadata": _loads(row.metadata_json, {}), "created_at": row.created_at.isoformat()}
+
+    def _recovery_history_dict(self, row: RecoveryHistory) -> dict:
+        return {"id": row.id, "event_type": row.event_type, "title": row.title, "message": row.message, "status": row.status, "metadata": _loads(row.metadata_json, {}), "created_at": row.created_at.isoformat()}
 
     def _project_backup_dict(self, row: ProjectBackup) -> dict:
         return {"id": row.id, "project_path": row.project_path, "action": row.action, "backup_path": row.backup_path, "status": row.status, "detail": _loads(row.detail_json, {}), "created_at": row.created_at.isoformat()}
@@ -3045,9 +4654,106 @@ class EvolutionService:
     def _screenshot_action_dict(self, row: ScreenshotAction) -> dict:
         return {"id": row.id, "screenshot_id": row.screenshot_id, "action_type": row.action_type, "status": row.status, "detail": _loads(row.detail_json, {}), "created_at": row.created_at.isoformat()}
 
+    def _goal_progress_percent(self, row: Goal) -> float:
+        return 100 if row.target_value <= 0 else round(min(100, max(0, row.current_value) / row.target_value * 100), 2)
+
     def _goal_dict(self, row: Goal) -> dict:
-        progress = 100 if row.target_value <= 0 else round(min(100, row.current_value / row.target_value * 100), 2)
-        return {"id": row.id, "title": row.title, "goal_type": row.goal_type, "target_value": row.target_value, "current_value": row.current_value, "unit": row.unit, "period": row.period, "status": row.status, "progress_percent": progress, "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat()}
+        progress = self._goal_progress_percent(row)
+        remaining = round(max(0, row.target_value - row.current_value), 2)
+        return {
+            "id": row.id,
+            "title": row.title,
+            "description": getattr(row, "description", ""),
+            "goal_type": row.goal_type,
+            "category": getattr(row, "category", row.goal_type),
+            "priority": getattr(row, "priority", "medium"),
+            "target_value": row.target_value,
+            "current_value": row.current_value,
+            "remaining_value": remaining,
+            "unit": row.unit,
+            "period": row.period,
+            "deadline": getattr(row, "deadline", ""),
+            "reminder_settings": _loads(getattr(row, "reminder_settings_json", "{}"), {}),
+            "status": row.status,
+            "progress_percent": progress,
+            "estimated_completion": self._goal_forecast(row),
+            "created_at": row.created_at.isoformat(),
+            "updated_at": row.updated_at.isoformat(),
+        }
+
+    def _goal_detail_dict(self, db: Session, row: Goal) -> dict:
+        payload = self._goal_dict(row)
+        progress = db.query(GoalProgress).filter(GoalProgress.goal_id == row.id).order_by(GoalProgress.created_at.desc()).limit(10).all()
+        streak = db.query(Streak).filter(Streak.goal_id == row.id).order_by(Streak.updated_at.desc()).first()
+        payload.update({
+            "progress_history": [self._goal_progress_dict(item) for item in progress],
+            "streak": self._streak_dict(streak) if streak else None,
+        })
+        return payload
+
+    def _goal_forecast(self, row: Goal) -> dict:
+        remaining = max(0, float(row.target_value or 0) - float(row.current_value or 0))
+        daily_rate = max(float(row.current_value or 0), 0.01) if row.period == "daily" else max(float(row.current_value or 0) / 7, 0.01)
+        days = 0 if remaining <= 0 else round(remaining / daily_rate, 1)
+        return {"remaining_value": round(remaining, 2), "estimated_completion_days": days}
+
+    def _record_goal_event(self, db: Session, row: Goal, event_type: str, title: str, message: str, metadata: dict | None = None) -> None:
+        db.add(GoalHistory(goal_id=row.id, event_type=event_type, title=title, message=message, status=row.status, metadata_json=json.dumps(metadata or {}, default=str)))
+
+    def _record_goal_analytics(self, db: Session, row: Goal, source: str = "manual") -> None:
+        progress = self._goal_progress_percent(row)
+        today = date.today().isoformat()
+        completion_rate = round(float(row.current_value or 0) / max(float(row.target_value or 1), 1) * 100, 2)
+        db.add(GoalAnalytics(goal_id=row.id, analytics_date=today, progress_value=row.current_value, progress_percent=progress, completion_rate=completion_rate, estimated_completion_days=self._goal_forecast(row)["estimated_completion_days"], metadata_json=json.dumps({"source": source, "goal_type": row.goal_type}, default=str)))
+
+    def _update_goal_streak(self, db: Session, row: Goal) -> None:
+        today = date.today()
+        today_key = today.isoformat()
+        streak = db.query(Streak).filter(Streak.goal_id == row.id, Streak.streak_type == row.period).one_or_none()
+        if not streak:
+            streak = Streak(goal_id=row.id, streak_type=row.period, current_count=1, best_count=1, last_activity_date=today_key, metadata_json=json.dumps({"goal_type": row.goal_type}, default=str))
+            db.add(streak)
+            return
+        if streak.last_activity_date == today_key:
+            streak.current_count = max(1, streak.current_count)
+        else:
+            try:
+                previous = datetime.fromisoformat(streak.last_activity_date).date()
+            except ValueError:
+                previous = today - timedelta(days=10)
+            streak.current_count = streak.current_count + 1 if (today - previous).days == 1 else 1
+            streak.last_activity_date = today_key
+        streak.best_count = max(streak.best_count, streak.current_count)
+        streak.updated_at = datetime.utcnow()
+        if streak.current_count in {7, 30, 100}:
+            self._unlock_achievement(db, f"{streak.current_count} Day {row.goal_type.title()} Streak", "Streak", f"{row.title} has a {streak.current_count} day streak.", {"goal_id": row.id, "streak": streak.current_count})
+
+    def _goal_progress_since(self, db: Session, days: int) -> list[dict]:
+        start = datetime.utcnow() - timedelta(days=days)
+        rows = db.query(GoalProgress).filter(GoalProgress.created_at >= start).order_by(GoalProgress.created_at.desc()).limit(100).all()
+        return [self._goal_progress_dict(row) for row in rows]
+
+    def _average_goal_completion_days(self, db: Session) -> float:
+        completed = db.query(Goal).filter(Goal.status == "achieved").all()
+        if not completed:
+            return 0
+        days = [max(0, (row.updated_at - row.created_at).total_seconds() / 86400) for row in completed]
+        return round(sum(days) / len(days), 2)
+
+    def _goal_progress_dict(self, row: GoalProgress) -> dict:
+        return {"id": row.id, "goal_id": row.goal_id, "delta_value": row.delta_value, "current_value": row.current_value, "progress_percent": row.progress_percent, "source": row.source, "note": row.note, "metadata": _loads(row.metadata_json, {}), "created_at": row.created_at.isoformat()}
+
+    def _goal_history_dict(self, row: GoalHistory) -> dict:
+        return {"id": row.id, "goal_id": row.goal_id, "event_type": row.event_type, "title": row.title, "message": row.message, "status": row.status, "metadata": _loads(row.metadata_json, {}), "created_at": row.created_at.isoformat()}
+
+    def _streak_dict(self, row: Streak) -> dict:
+        return {"id": row.id, "goal_id": row.goal_id, "streak_type": row.streak_type, "current_count": row.current_count, "best_count": row.best_count, "last_activity_date": row.last_activity_date, "status": row.status, "metadata": _loads(row.metadata_json, {}), "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat()}
+
+    def _goal_analytics_dict(self, row: GoalAnalytics) -> dict:
+        return {"id": row.id, "goal_id": row.goal_id, "analytics_date": row.analytics_date, "progress_value": row.progress_value, "progress_percent": row.progress_percent, "completion_rate": row.completion_rate, "estimated_completion_days": row.estimated_completion_days, "metadata": _loads(row.metadata_json, {}), "created_at": row.created_at.isoformat()}
+
+    def _goal_reminder_dict(self, row: GoalReminder) -> dict:
+        return {"id": row.id, "goal_id": row.goal_id, "reminder_type": row.reminder_type, "message": row.message, "due_at": _iso(row.due_at), "status": row.status, "metadata": _loads(row.metadata_json, {}), "created_at": row.created_at.isoformat(), "sent_at": _iso(row.sent_at)}
 
     def _achievement_dict(self, row: Achievement) -> dict:
         return {"id": row.id, "title": row.title, "badge": row.badge, "description": row.description, "progress_percent": row.progress_percent, "unlocked": row.unlocked, "unlocked_at": _iso(row.unlocked_at), "metadata": _loads(row.metadata_json, {}), "created_at": row.created_at.isoformat()}
@@ -3055,8 +4761,54 @@ class EvolutionService:
     def _suggestion_dict(self, row: CopilotSuggestion) -> dict:
         return {"id": row.id, "suggestion_type": row.suggestion_type, "title": row.title, "message": row.message, "severity": row.severity, "module": row.module, "action": _loads(row.action_json, {}), "status": row.status, "created_at": row.created_at.isoformat(), "acted_at": _iso(row.acted_at)}
 
+    def _context_snapshot_dict(self, row: ContextSnapshot) -> dict:
+        return {"id": row.id, "current_app": row.current_app, "current_window": row.current_window, "activity_type": row.activity_type, "priority_context": row.priority_context, "payload": _loads(row.payload_json, {}), "privacy_mode": row.privacy_mode, "created_at": row.created_at.isoformat()}
+
+    def _copilot_insight_dict(self, row: CopilotInsight) -> dict:
+        return {"id": row.id, "insight_type": row.insight_type, "title": row.title, "message": row.message, "period": row.period, "severity": row.severity, "recommendation": row.recommendation, "metadata": _loads(row.metadata_json, {}), "created_at": row.created_at.isoformat()}
+
+    def _copilot_warning_dict(self, row: CopilotWarning) -> dict:
+        return {"id": row.id, "warning_type": row.warning_type, "module": row.module, "title": row.title, "message": row.message, "severity": row.severity, "status": row.status, "metadata": _loads(row.metadata_json, {}), "created_at": row.created_at.isoformat(), "resolved_at": _iso(row.resolved_at)}
+
+    def _copilot_action_dict(self, row: CopilotAction) -> dict:
+        return {"id": row.id, "suggestion_id": row.suggestion_id, "action_type": row.action_type, "title": row.title, "payload": _loads(row.payload_json, {}), "status": row.status, "result": _loads(row.result_json, {}), "created_at": row.created_at.isoformat(), "executed_at": _iso(row.executed_at)}
+
+    def _copilot_history_dict(self, row: CopilotHistory) -> dict:
+        return {"id": row.id, "event_type": row.event_type, "suggestion_id": row.suggestion_id, "title": row.title, "detail": _loads(row.detail_json, {}), "status": row.status, "created_at": row.created_at.isoformat()}
+
+    def _copilot_analytics_dict(self, row: CopilotAnalytics) -> dict:
+        return {"id": row.id, "analytics_date": row.analytics_date, "suggestions_generated": row.suggestions_generated, "suggestions_acted": row.suggestions_acted, "warnings_open": row.warnings_open, "critical_count": row.critical_count, "helpful_score": row.helpful_score, "metadata": _loads(row.metadata_json, {}), "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat()}
+
     def _college_dict(self, row: CollegeUpdate) -> dict:
         return {"id": row.id, "source": row.source, "update_type": row.update_type, "title": row.title, "message": row.message, "url": row.url, "status": row.status, "payload": _loads(row.payload_json, {}), "created_at": row.created_at.isoformat()}
+
+    def _college_profile_dict(self, row: CollegeProfile) -> dict:
+        return {"id": row.id, "name": row.name, "portal_type": row.portal_type, "website_profile_id": row.website_profile_id, "target_attendance_percent": row.target_attendance_percent, "status": row.status, "auto_login_ready": bool(row.website_profile_id), "session_restore_ready": bool(row.session_state_encrypted), "last_checked_at": _iso(row.last_checked_at), "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat()}
+
+    def _attendance_dict(self, row: AttendanceRecord) -> dict:
+        return {"id": row.id, "profile_id": row.profile_id, "source": row.source, "subject": row.subject, "attended_classes": row.attended_classes, "total_classes": row.total_classes, "percentage": row.percentage, "target_percentage": row.target_percentage, "trend": row.trend, "status": row.status, "recorded_at": row.recorded_at.isoformat()}
+
+    def _internal_mark_dict(self, row: InternalMark) -> dict:
+        percent = round(row.marks_obtained / row.max_marks * 100, 2) if row.max_marks else 0
+        return {"id": row.id, "profile_id": row.profile_id, "source": row.source, "subject": row.subject, "component": row.component, "marks_obtained": row.marks_obtained, "max_marks": row.max_marks, "percentage": percent, "status": row.status, "recorded_at": row.recorded_at.isoformat()}
+
+    def _result_record_dict(self, row: ResultRecord) -> dict:
+        return {"id": row.id, "profile_id": row.profile_id, "source": row.source, "exam_name": row.exam_name, "result_type": row.result_type, "summary": row.summary, "score": row.score, "rank": row.rank, "payload": _loads(row.payload_json, {}), "status": row.status, "recorded_at": row.recorded_at.isoformat()}
+
+    def _assignment_record_dict(self, row: AssignmentRecord) -> dict:
+        return {"id": row.id, "profile_id": row.profile_id, "source": row.source, "title": row.title, "subject": row.subject, "due_at": _iso(row.due_at), "status": row.status, "detail": _loads(row.detail_json, {}), "created_at": row.created_at.isoformat()}
+
+    def _fee_record_dict(self, row: FeeRecord) -> dict:
+        return {"id": row.id, "profile_id": row.profile_id, "source": row.source, "fee_type": row.fee_type, "amount": row.amount, "currency": row.currency, "due_at": _iso(row.due_at), "receipt_path": row.receipt_path, "status": row.status, "recorded_at": row.recorded_at.isoformat()}
+
+    def _timetable_record_dict(self, row: TimetableRecord) -> dict:
+        return {"id": row.id, "profile_id": row.profile_id, "source": row.source, "schedule_type": row.schedule_type, "title": row.title, "starts_at": _iso(row.starts_at), "ends_at": _iso(row.ends_at), "location": row.location, "payload": _loads(row.payload_json, {}), "created_at": row.created_at.isoformat()}
+
+    def _announcement_record_dict(self, row: AnnouncementRecord) -> dict:
+        return {"id": row.id, "profile_id": row.profile_id, "source": row.source, "announcement_type": row.announcement_type, "title": row.title, "message": row.message, "url": row.url, "status": row.status, "created_at": row.created_at.isoformat()}
+
+    def _kcet_record_dict(self, row: KCETRecord) -> dict:
+        return {"id": row.id, "profile_id": row.profile_id, "event_type": row.event_type, "title": row.title, "rank": row.rank, "score": row.score, "screenshot_path": row.screenshot_path, "pdf_path": row.pdf_path, "payload": _loads(row.payload_json, {}), "status": row.status, "created_at": row.created_at.isoformat()}
 
 
 evolution_service = EvolutionService()

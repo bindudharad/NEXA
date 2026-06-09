@@ -1,7 +1,8 @@
 from fastapi.testclient import TestClient
 from pathlib import Path
+from uuid import uuid4
 
-from backend.database.models import FocusSession
+from backend.database.models import ActivityLog, CodingSession, FocusSession
 from backend.database.session import SessionLocal
 from backend.main import app
 
@@ -30,6 +31,62 @@ def test_coding_endpoints():
     assert client.get("/api/coding/report").status_code == 200
     assert client.get("/api/coding/weekly-report").status_code == 200
     assert client.post("/api/coding/snapshot").status_code == 200
+
+
+def test_true_coding_activity_counts_active_work_only():
+    project = f"Nexa Active Coding API {uuid4().hex}"
+    active = client.post(
+        "/api/coding/activity",
+        json={
+            "app_name": "VS Code",
+            "process_name": "code.exe",
+            "window_title": "main.py - Nexa",
+            "project": project,
+            "active_file": "main.py",
+            "interaction_type": "typing",
+            "duration_seconds": 120,
+            "idle_seconds": 3,
+            "keystrokes": 42,
+            "mouse_events": 4,
+            "file_changes": 2,
+            "terminal_commands": 1,
+            "git_commands": 1,
+            "builds": 1,
+            "tests": 1,
+            "errors_fixed": 1,
+        },
+    )
+    assert active.status_code == 200
+    assert active.json()["counted"] is True
+    assert active.json()["counted_seconds"] == 120
+
+    idle = client.post(
+        "/api/coding/activity",
+        json={"app_name": "VS Code", "process_name": "code.exe", "project": project, "interaction_type": "typing", "duration_seconds": 90, "idle_seconds": 45, "keystrokes": 0},
+    )
+    assert idle.status_code == 200
+    assert idle.json()["counted"] is False
+    assert idle.json()["reason"] == "activity_below_threshold"
+
+    distraction = client.post(
+        "/api/coding/activity",
+        json={"app_name": "Chrome", "process_name": "chrome.exe", "window_title": "YouTube Reels", "project": project, "interaction_type": "mouse", "duration_seconds": 90, "idle_seconds": 1, "mouse_events": 40},
+    )
+    assert distraction.status_code == 200
+    assert distraction.json()["counted"] is False
+    assert distraction.json()["reason"] in {"distraction_app", "non_coding_activity"}
+
+    report = client.get("/api/coding/report")
+    assert report.status_code == 200
+    body = report.json()
+    assert body["real_coding_seconds"] >= 120
+    assert body["deep_coding_seconds"] >= 120
+    assert body["idle_seconds"] >= 90
+    assert body["distraction_seconds"] >= 90
+    assert body["validation"]["counts_only_active_work"] is True
+    with SessionLocal() as db:
+        assert db.query(CodingSession).filter(CodingSession.project == project).count() == 1
+        assert db.query(ActivityLog).filter(ActivityLog.activity_type == "coding_activity", ActivityLog.project == project).count() >= 3
 
 
 def test_automation_metric_endpoint():
@@ -265,6 +322,51 @@ def test_ai_memory_timeline_api():
     assert "insights" in dashboard.json()
 
 
+def test_goal_tracker_api_lifecycle():
+    created = client.post("/api/evolution/goals", json={"title": "API Goal Tracker", "description": "API coverage", "target_value": 3, "unit": "tasks", "goal_type": "task", "period": "daily", "priority": "high", "category": "task"})
+    assert created.status_code == 200
+    goal_id = created.json()["id"]
+
+    increment = client.post(f"/api/evolution/goals/{goal_id}/increment", json={"delta_value": 1, "source": "api_test", "note": "first task"})
+    assert increment.status_code == 200
+    assert increment.json()["current_value"] >= 1
+
+    updated = client.put(f"/api/evolution/goals/{goal_id}", json={"current_value": 3, "source": "api_test", "note": "complete"})
+    assert updated.status_code == 200
+    assert updated.json()["status"] == "achieved"
+
+    dashboard = client.get("/api/evolution/goals/dashboard")
+    assert dashboard.status_code == 200
+    body = dashboard.json()
+    assert body["offline_ready"] is True
+    assert "analytics" in body
+    assert body["recent_activity"]
+
+    history = client.get("/api/evolution/goals/history")
+    assert history.status_code == 200
+    assert any(item["goal_id"] == goal_id for item in history.json())
+
+    analytics = client.get("/api/evolution/goals/analytics")
+    assert analytics.status_code == 200
+    assert "success_rate" in analytics.json()
+
+
+def test_self_health_api_lifecycle():
+    dashboard = client.get("/api/evolution/self-health")
+    assert dashboard.status_code == 200
+    body = dashboard.json()
+    assert "cpu" in body
+    assert "ram" in body
+    assert "api_health" in body
+    assert "automation_health" in body
+    assert body["offline_ready"] is True
+
+    optimized = client.post("/api/evolution/self-health/optimize", json={"action": "optimize"})
+    assert optimized.status_code == 200
+    assert optimized.json()["action"] == "optimize"
+    assert "dashboard" in optimized.json()
+
+
 def test_project_guardian_api_lifecycle(tmp_path: Path):
     project = tmp_path / "project"
     project.mkdir()
@@ -293,6 +395,83 @@ def test_project_guardian_api_lifecycle(tmp_path: Path):
     health = client.post(f"/api/evolution/project-guardian/projects/{project_id}/health")
     assert health.status_code == 200
     assert "recommendations" in health.json()
+
+
+def test_automation_builder_dashboard_history_templates_api():
+    built = client.post("/api/evolution/automation-builder", json={"prompt": "When battery reaches 20% and charger is not connected, notify me every 2 minutes."})
+    assert built.status_code == 200
+    assert built.json()["schedule"]["repeat_every_seconds"] == 120
+
+    templates = client.get("/api/automations/templates")
+    assert templates.status_code == 200
+    assert any(item["name"] == "Battery Low Alert" for item in templates.json())
+
+    dashboard = client.get("/api/automations/dashboard")
+    assert dashboard.status_code == 200
+    assert dashboard.json()["offline_ready"] is True
+    assert len(dashboard.json()["active"]) >= 1
+
+    history = client.get("/api/automations/history")
+    assert history.status_code == 200
+    assert any(item["event_type"] == "created" for item in history.json())
+
+    analytics = client.get("/api/automations/analytics")
+    assert analytics.status_code == 200
+    assert "success_rate" in analytics.json()["summary"]
+
+
+def test_voice_personality_api_lifecycle():
+    profiles = client.get("/api/voice/profiles")
+    assert profiles.status_code == 200
+    assert any(item["profile_key"] == "professional" for item in profiles.json())
+
+    custom = client.post("/api/voice/custom-personalities", json={"name": "API Custom", "wake_responses": ["Ready API."], "completion_responses": ["API done."]})
+    assert custom.status_code == 200
+    custom_id = custom.json()["id"]
+
+    settings = client.put("/api/voice/settings", json={"response_style": "custom", "custom_personality_id": custom_id, "voice_enabled": False})
+    assert settings.status_code == 200
+    assert settings.json()["response_style"] == "custom"
+
+    wake = client.post("/api/voice/wake", json={"phrase": "Nexa", "source": "api_test"})
+    assert wake.status_code == 200
+    assert wake.json()["response"] == "Ready API."
+
+    dashboard = client.get("/api/voice/dashboard")
+    assert dashboard.status_code == 200
+    body = dashboard.json()
+    assert body["current_personality"] == "custom"
+    assert body["offline_ready"] is True
+    assert body["wake_history"]
+
+    deleted = client.delete(f"/api/voice/custom-personalities/{custom_id}")
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] is True
+
+
+def test_emergency_recovery_api_lifecycle(tmp_path: Path):
+    project = tmp_path / "recovery"
+    project.mkdir()
+    (project / "app.py").write_text("print('recovery')", encoding="utf-8")
+
+    simulated = client.post("/api/evolution/recovery/simulate", json={"event_type": "vscode_crash", "application": "VS Code", "project_path": str(project)})
+    assert simulated.status_code == 200
+    assert simulated.json()["crash_report"]["application"] == "VS Code"
+
+    captured = client.post("/api/evolution/recovery/sessions", json={"session_type": "workspace", "applications": [{"name": "Terminal", "workspace_path": str(project)}], "project_path": str(project)})
+    assert captured.status_code == 200
+    session_id = captured.json()["id"]
+
+    restored = client.post(f"/api/evolution/recovery/sessions/{session_id}/restore")
+    assert restored.status_code == 200
+    assert restored.json()["status"] == "restored"
+
+    dashboard = client.get("/api/evolution/recovery/dashboard")
+    assert dashboard.status_code == 200
+    body = dashboard.json()
+    assert body["offline_ready"] is True
+    assert body["summary"]["crash_reports"] >= 1
+    assert body["capabilities"]["session_restore"] is True
 
 
 def test_smart_download_manager_api(tmp_path: Path):
@@ -349,3 +528,89 @@ def test_screenshot_assistant_api(tmp_path: Path):
     settings = client.put("/api/evolution/screenshots/settings", json={"cloud_ai_enabled": False, "require_cloud_approval": True})
     assert settings.status_code == 200
     assert settings.json()["require_cloud_approval"] is True
+
+
+def test_college_companion_api():
+    created = client.post("/api/evolution/college/profiles", json={"name": "API College", "portal_type": "erp", "target_attendance_percent": 80})
+    assert created.status_code == 200
+    assert created.json()["name"] == "API College"
+
+    dashboard = client.get("/api/evolution/college/dashboard")
+    assert dashboard.status_code == 200
+    assert dashboard.json()["offline_ready"] is True
+    assert dashboard.json()["security"]["credentials_encrypted"] is True
+
+    check = client.post("/api/evolution/college/check", json={"source": "college"})
+    assert check.status_code == 200
+    assert "dashboard" in check.json()
+
+    for section in ["attendance", "marks", "results", "assignments", "fees", "timetable", "announcements", "kcet"]:
+        response = client.get(f"/api/evolution/college/{section}")
+        assert response.status_code == 200
+        assert isinstance(response.json(), list)
+
+
+def test_mobile_companion_api_pairing_auth_and_sync():
+    start = client.post("/api/mobile/pairing/start", json={"device_name": "API Android"})
+    assert start.status_code == 200
+    pairing = start.json()
+
+    claim = client.post(
+        "/api/mobile/pairing/claim",
+        json={"pairing_code": pairing["pairing_code"], "pairing_token": pairing["pairing_token"], "device_name": "API Android", "device_fingerprint": "api-fingerprint"},
+    )
+    assert claim.status_code == 200
+    token = claim.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    battery = client.get("/api/mobile/battery/status", headers=headers)
+    assert battery.status_code == 200
+
+    created_task = client.post("/api/mobile/tasks", headers=headers, json={"command": "Mobile API task"})
+    assert created_task.status_code == 200
+    assert created_task.json()["agent"] == "mobile_companion"
+
+    sync = client.post("/api/mobile/sync", headers=headers, json={"item_type": "task", "operation": "upsert", "payload": {"title": "Offline task"}})
+    assert sync.status_code == 200
+    assert sync.json()["status"] == "pending"
+
+    command = client.post("/api/mobile/commands", headers=headers, json={"command": "shutdown", "payload": {"reason": "api test"}})
+    assert command.status_code == 200
+    assert command.json()["requires_approval"] is True
+
+    dashboard = client.get("/api/mobile/dashboard")
+    assert dashboard.status_code == 200
+    assert dashboard.json()["devices"]
+
+
+def test_copilot_mode_api_dashboard_settings_and_actions():
+    settings = client.put("/api/evolution/copilot/settings", json={"privacy_mode": "local", "modules": {"battery": True, "health": True}, "notifications_enabled": True})
+    assert settings.status_code == 200
+    assert settings.json()["privacy_mode"] == "local"
+
+    context = client.post("/api/evolution/copilot/context")
+    assert context.status_code == 200
+    assert context.json()["payload"]["privacy"]["local_processing"] is True
+
+    evaluated = client.post("/api/evolution/copilot/evaluate")
+    assert evaluated.status_code == 200
+
+    dashboard = client.get("/api/evolution/copilot/dashboard")
+    assert dashboard.status_code == 200
+    body = dashboard.json()
+    assert body["offline_ready"] is True
+    assert "quick_actions" in body
+    assert "orbital" in body
+
+    suggestions = client.get("/api/evolution/copilot/suggestions")
+    assert suggestions.status_code == 200
+    if suggestions.json():
+        suggestion_id = suggestions.json()[0]["id"]
+        action = client.post(f"/api/evolution/copilot/suggestions/{suggestion_id}/actions", json={"action_type": "save"})
+        assert action.status_code == 200
+        assert action.json()["suggestion"]["status"] == "saved"
+
+    assert client.get("/api/evolution/copilot/insights").status_code == 200
+    assert client.get("/api/evolution/copilot/warnings").status_code == 200
+    assert client.get("/api/evolution/copilot/history").status_code == 200
+    assert client.get("/api/evolution/copilot/analytics").status_code == 200

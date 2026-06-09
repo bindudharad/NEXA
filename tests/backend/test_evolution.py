@@ -1,6 +1,10 @@
+import json
+from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
-from backend.database.models import Achievement, ActivityHistory, Automation, BlockedSite, BriefingAnalytics, BriefingHistory, BriefingRecommendation, BriefingSchedule, CleanupSuggestion, CollegeUpdate, DailyBriefing, DocumentSummary, DownloadAnalytics, DownloadRule, DuplicateFile, ErrorAnalysis, FocusAnalytics, FocusGoal, FocusHistory, FocusSession, GitHistory, Goal, MemorySearch, OCRResult, ProjectBackup, ProjectEvent, ProjectHealth, ProjectSnapshot, RecoveryPoint, ScreenshotAction, ScreenshotHistory, StorageReport, StudyAnalytics, StudyChapter, StudyPlan, StudySession, StudySubject, TimelineEvent, TimelineInsight, TimelineSummary
+from backend.database.models import Achievement, ActivityHistory, AnnouncementRecord, AssignmentRecord, AttendanceRecord, Automation, AutomationAction, AutomationHealth, AutomationHistory, AutomationTrigger, BlockedSite, BriefingAnalytics, BriefingHistory, BriefingRecommendation, BriefingSchedule, CleanupSuggestion, CodingSession, CollegeProfile, CollegeUpdate, CrashReport, DailyBriefing, DocumentSummary, DownloadAnalytics, DownloadRule, DuplicateFile, ErrorAnalysis, FeeRecord, FocusAnalytics, FocusGoal, FocusHistory, FocusSession, GitHistory, Goal, GoalAnalytics, GoalHistory, GoalProgress, HealthMetric, HealthScore, IncidentReport, InternalMark, KCETRecord, MemorySearch, OCRResult, OptimizationEvent, ProjectBackup, ProjectEvent, ProjectHealth, ProjectSnapshot, RecoveredApplication, RecoveryEvent, RecoveryHistory, RecoveryPoint, RecoverySession, ResourceUsage, ResultRecord, ScreenshotAction, ScreenshotHistory, StorageReport, Streak, StudyAnalytics, StudyChapter, StudyPlan, StudySession, StudySubject, TimetableRecord, TimelineEvent, TimelineInsight, TimelineSummary, WebsiteProfile
+from backend.database.models import ContextSnapshot, CopilotAction, CopilotAnalytics, CopilotHistory, CopilotInsight, CopilotWarning, DeviceToken, MobileAuditLog, MobileDevice, PairingCode, SyncQueue
 from backend.database.session import SessionLocal, init_database
 from backend.services.download_monitor import DownloadMonitoringService
 from backend.services.evolution import EvolutionService
@@ -54,6 +58,10 @@ def test_daily_briefing_history_recommendations_analytics_and_mobile():
         assert recommendations
         assert analytics
         assert mobile["daily_briefing"]["id"] == briefing["id"]
+        assert "copilot" in briefing["payload"]
+        assert "top_recommendations" in briefing["payload"]["copilot"]
+        assert "copilot" in mobile
+        assert mobile["copilot"]["offline_ready"] is True
 
 
 def test_daily_briefing_weather_offline_is_graceful(monkeypatch):
@@ -216,14 +224,72 @@ def test_goal_unlocks_achievement():
     service = EvolutionService(SessionLocal)
 
     with SessionLocal() as db:
-        goal = service.create_goal(db, "Code 4 Hours", 4, "hours", "coding")
-        updated = service.update_goal(db, goal["id"], 4)
+        goal = service.create_goal(db, "Code 4 Hours", 4, "hours", "coding", description="Daily coding", deadline="2026-06-20", priority="high", category="coding")
+        updated = service.update_goal(db, goal["id"], 4, "test", "completed in test")
         stats = service.goal_stats(db)
+        dashboard = service.goal_dashboard(db)
+        analytics = service.goal_analytics(db)
 
         assert updated["status"] == "achieved"
+        assert updated["description"] == "Daily coding"
+        assert updated["priority"] == "high"
         assert stats["achieved"] >= 1
+        assert dashboard["offline_ready"] is True
+        assert dashboard["completed_goals"]
+        assert "success_rate" in analytics
         assert db.query(Achievement).filter(Achievement.title.contains("Code 4 Hours")).count() >= 1
+        assert db.query(GoalProgress).filter(GoalProgress.goal_id == goal["id"]).count() >= 1
+        assert db.query(GoalHistory).filter(GoalHistory.goal_id == goal["id"]).count() >= 1
+        assert db.query(GoalAnalytics).filter(GoalAnalytics.goal_id == goal["id"]).count() >= 1
+        assert db.query(Streak).filter(Streak.goal_id == goal["id"]).count() >= 1
         assert db.get(Goal, goal["id"]) is not None
+
+
+def test_goal_auto_tracking_uses_coding_study_and_focus_sources():
+    init_database()
+    service = EvolutionService(SessionLocal)
+    today = datetime.utcnow()
+
+    with SessionLocal() as db:
+        coding = service.create_goal(db, "Auto Coding Goal", 2, "hours", "coding")
+        study = service.create_goal(db, "Auto Study Goal", 1, "hours", "study")
+        focus = service.create_goal(db, "Auto Focus Goal", 30, "minutes", "focus")
+        db.add(CodingSession(app_name="VS Code", project="Nexa", duration_seconds=7200, started_at=today))
+        db.add(StudySession(subject_name="DBMS", duration_seconds=3600, started_at=today, created_at=today))
+        db.add(FocusSession(title="Focus", duration_seconds=1800, started_at=today, status="completed"))
+        db.commit()
+
+        result = service.refresh_goal_auto_tracking(db)
+        dashboard = service.goal_dashboard(db)
+
+        assert result["count"] >= 3
+        refreshed = {goal["id"]: goal for goal in dashboard["goals"]}
+        assert refreshed[coding["id"]]["progress_percent"] == 100
+        assert refreshed[study["id"]]["progress_percent"] == 100
+        assert refreshed[focus["id"]]["progress_percent"] == 100
+
+
+def test_self_health_dashboard_persists_metrics_and_optimizes():
+    init_database()
+    service = EvolutionService(SessionLocal)
+
+    with SessionLocal() as db:
+        dashboard = service.self_health(db)
+        optimized = service.optimize_self_health(db, "optimize")
+
+        assert "cpu" in dashboard
+        assert "ram" in dashboard
+        assert "api_health" in dashboard
+        assert "automation_health" in dashboard
+        assert "module_scores" in dashboard
+        assert dashboard["offline_ready"] is True
+        assert dashboard["orbital"]["button"] == "Health"
+        assert optimized["action"] == "optimize"
+        assert db.query(ResourceUsage).count() >= 1
+        assert db.query(HealthScore).count() >= 1
+        assert db.query(HealthMetric).count() >= 1
+        assert db.query(AutomationHealth).count() >= 1
+        assert db.query(OptimizationEvent).count() >= 1
 
 
 def test_automation_builder_creates_existing_automation_record():
@@ -231,10 +297,14 @@ def test_automation_builder_creates_existing_automation_record():
     service = EvolutionService(SessionLocal)
 
     with SessionLocal() as db:
-        result = service.build_automation(db, "When battery reaches 20% notify me")
+        result = service.build_automation(db, "When battery reaches 20% and charger is not connected, notify me every 2 minutes")
 
-        assert result["automation"]["condition"]["metric"] == "battery"
+        assert result["trigger"]["metric"] == "battery"
+        assert result["conditions"][0]["metric"] == "charging"
+        assert result["schedule"]["repeat_every_seconds"] == 120
         assert db.get(Automation, result["automation"]["id"]) is not None
+        assert db.query(AutomationTrigger).count() >= 1
+        assert db.query(AutomationAction).count() >= 1
 
 
 def test_automation_builder_marks_high_risk_for_approval():
@@ -245,6 +315,38 @@ def test_automation_builder_marks_high_risk_for_approval():
         result = service.build_automation(db, "When I say cleanup delete files after browser automation")
 
         assert result["approval"]["required"] is True
+        assert result["automation"]["actions"][0]["requires_approval"] is True
+
+
+def test_automation_builder_codex_and_kcet_examples():
+    init_database()
+    service = EvolutionService(SessionLocal)
+
+    with SessionLocal() as db:
+        shutdown = service.build_automation(db, "After Codex finishes all queued tasks, shutdown the laptop after 5 minutes.")
+        kcet = service.build_automation(db, "Check KCET results every 30 minutes.")
+        briefing = service.generate_daily_briefing(db, notify=False, delivery_method="dashboard")
+
+        assert shutdown["trigger"]["event_type"] == "codex_queue_completed"
+        assert shutdown["action"]["type"] == "shutdown"
+        assert shutdown["approval"]["required"] is True
+        assert shutdown["schedule"]["delay_seconds"] == 300
+        assert kcet["trigger"]["event_type"] == "kcet_available"
+        assert kcet["schedule"]["repeat_every_seconds"] == 1800
+        assert any(item["id"] == "automations" for item in briefing["payload"]["sections"])
+        assert db.query(AutomationHistory).filter(AutomationHistory.event_type == "created").count() >= 2
+
+
+def test_daily_briefing_uses_voice_personality():
+    init_database()
+    service = EvolutionService(SessionLocal)
+    from backend.services.voice_assistant import voice_assistant_service
+
+    with SessionLocal() as db:
+        voice_assistant_service.update_settings({"response_style": "jarvis"}, db)
+        briefing = service.generate_daily_briefing(db, notify=False, delivery_method="dashboard")
+
+        assert briefing["payload"]["voice_text"].startswith("Good morning. Your briefing is ready.")
 
 
 def test_college_companion_requests_profile_when_missing():
@@ -256,6 +358,54 @@ def test_college_companion_requests_profile_when_missing():
 
         assert result["requires_profile"] is True
         assert db.query(CollegeUpdate).filter(CollegeUpdate.status == "requires_profile").count() >= 1
+
+
+def test_college_companion_ingests_profile_data_and_dashboard():
+    init_database()
+    service = EvolutionService(SessionLocal)
+    sample = {
+        "college_data": {
+            "attendance": [{"subject": "Overall", "attended_classes": 62, "total_classes": 80, "percentage": 72.5}],
+            "marks": [{"subject": "DBMS", "component": "CIA", "marks_obtained": 42, "max_marks": 50}],
+            "results": [{"exam_name": "Semester 4", "summary": "Passed", "score": "8.4 SGPA"}],
+            "assignments": [{"title": "DBMS Assignment", "subject": "DBMS", "deadline": "2099-01-02", "status": "pending"}],
+            "fees": [{"fee_type": "Exam Fee", "amount": 1200, "due_at": "2099-01-05", "status": "pending"}],
+            "timetables": [{"title": "DBMS Lab", "starts_at": "2099-01-01T10:00:00", "ends_at": "2099-01-01T12:00:00", "location": "Lab 1"}],
+            "announcements": [{"title": "Holiday Notice", "message": "College closed tomorrow."}],
+            "kcet": [{"title": "KCET Result", "rank": "12345", "score": "88"}],
+        }
+    }
+
+    with SessionLocal() as db:
+        profile = WebsiteProfile(name=f"Contineo Portal {uuid4().hex}", url="https://contineo.test", success_check_json=json.dumps(sample))
+        db.add(profile)
+        db.commit()
+        result = service.check_college_updates(db, "college")
+        dashboard = service.college_dashboard(db)
+        briefing = service.generate_daily_briefing(db, speak=False, notify=False)
+
+        assert result["requires_profile"] is False
+        assert dashboard["offline_ready"] is True
+        assert dashboard["security"]["credentials_encrypted"] is True
+        assert dashboard["attendance"][0]["percentage"] == 72.5
+        assert dashboard["marks"][0]["subject"] == "DBMS"
+        assert dashboard["results"][0]["exam_name"] == "Semester 4"
+        assert dashboard["assignments"][0]["title"] == "DBMS Assignment"
+        assert dashboard["fees"][0]["fee_type"] == "Exam Fee"
+        assert dashboard["timetables"][0]["title"] == "DBMS Lab"
+        assert dashboard["announcements"][0]["title"] == "Holiday Notice"
+        assert dashboard["kcet"][0]["rank"] == "12345"
+        assert dashboard["recommendations"][0]["type"] == "attendance_warning"
+        assert "summary" in briefing["payload"]["college"]
+        assert db.query(CollegeProfile).count() >= 1
+        assert db.query(AttendanceRecord).count() >= 1
+        assert db.query(InternalMark).count() >= 1
+        assert db.query(ResultRecord).count() >= 1
+        assert db.query(AssignmentRecord).count() >= 1
+        assert db.query(FeeRecord).count() >= 1
+        assert db.query(TimetableRecord).count() >= 1
+        assert db.query(AnnouncementRecord).count() >= 1
+        assert db.query(KCETRecord).count() >= 1
 
 
 def test_download_scan_and_screenshot_history(tmp_path: Path):
@@ -428,6 +578,56 @@ def test_project_guardian_protection_git_health_and_dashboard(tmp_path: Path):
         assert db.query(ProjectEvent).count() >= 1
 
 
+def test_emergency_recovery_records_restores_and_briefs(tmp_path: Path):
+    init_database()
+    service = EvolutionService(SessionLocal)
+    project = tmp_path / "recovery-project"
+    project.mkdir()
+    (project / "main.py").write_text("print('recover')", encoding="utf-8")
+
+    with SessionLocal() as db:
+        recorded = service.record_crash_report(
+            db,
+            "vscode_crash",
+            source="test",
+            application="VS Code",
+            message="VS Code closed unexpectedly.",
+            diagnostics={"open_files": ["main.py"], "workspace_path": str(project)},
+            project_path=str(project),
+        )
+        captured = service.capture_recovery_session(db, "terminal_crash", [{"name": "Terminal", "workspace_path": str(project), "terminal": {"cwd": str(project)}}], str(project))
+        restored = service.restore_recovery_session(db, captured["id"])
+        dashboard = service.recovery_dashboard(db)
+        briefing = service.generate_daily_briefing(db, notify=False, delivery_method="dashboard")
+
+        assert recorded["crash_report"]["application"] == "VS Code"
+        assert restored["status"] == "restored"
+        assert dashboard["summary"]["crash_reports"] >= 1
+        assert dashboard["capabilities"]["bsod_detection"] is True
+        assert any(item["id"] == "recovery" for item in briefing["payload"]["sections"])
+        assert db.query(CrashReport).count() >= 1
+        assert db.query(RecoverySession).count() >= 2
+        assert db.query(IncidentReport).count() >= 1
+        assert db.query(RecoveredApplication).count() >= 1
+        assert db.query(RecoveryEvent).count() >= 1
+        assert db.query(RecoveryHistory).count() >= 1
+
+
+def test_emergency_recovery_startup_heartbeat_detects_unclean_shutdown():
+    init_database()
+    service = EvolutionService(SessionLocal)
+    with SessionLocal() as db:
+        service._set_setting_value(db, "emergency_recovery.clean_shutdown", "false")
+        service._set_setting_value(db, "emergency_recovery.last_seen", "2026-06-08T00:00:00")
+        db.commit()
+
+    result = service.recovery_startup_check()
+    assert result["unclean_shutdown_detected"] is True
+    with SessionLocal() as db:
+        assert db.query(CrashReport).filter(CrashReport.crash_type == "unexpected_shutdown").count() >= 1
+    service.recovery_clean_shutdown()
+
+
 def test_copilot_and_mobile_summary_smoke():
     init_database()
     service = EvolutionService(SessionLocal)
@@ -441,5 +641,57 @@ def test_copilot_and_mobile_summary_smoke():
         assert isinstance(suggestions, list)
         assert "battery" in summary
         assert "notifications" in summary
+        assert "copilot" in summary
+        assert "quick_actions" in summary["copilot"]
         assert "authentication" in docs
         assert isinstance(achievements, list)
+
+
+def test_mobile_companion_pairing_auth_sync_and_remote_approval():
+    init_database()
+    service = EvolutionService(SessionLocal)
+
+    with SessionLocal() as db:
+        pairing = service.mobile_pairing_start(db, "Pixel Test")
+        claimed = service.mobile_pairing_claim(db, pairing["pairing_code"], pairing["pairing_token"], "Pixel Test", "android", f"fp-{uuid4()}")
+        device = service.mobile_authenticate(db, f"Bearer {claimed['access_token']}")
+        refreshed = service.mobile_refresh(db, claimed["refresh_token"])
+        sync = service.mobile_sync_enqueue(db, device, "task", "upsert", {"title": "Mobile task"})
+        approval = service.mobile_remote_command(db, device, "shutdown", {"reason": "test"})
+        dashboard = service.mobile_gateway_dashboard(db)
+
+        assert claimed["device"]["device_name"] == "Pixel Test"
+        assert refreshed["access_token"]
+        assert sync["status"] == "pending"
+        assert approval["requires_approval"] is True
+        assert dashboard["devices"]
+        assert db.query(MobileDevice).count() >= 1
+        assert db.query(DeviceToken).count() >= 1
+        assert db.query(PairingCode).filter(PairingCode.status == "claimed").count() >= 1
+        assert db.query(SyncQueue).count() >= 1
+        assert db.query(MobileAuditLog).count() >= 1
+
+
+def test_copilot_mode_context_dashboard_actions_and_settings():
+    init_database()
+    service = EvolutionService(SessionLocal)
+
+    with SessionLocal() as db:
+        settings = service.update_copilot_settings(db, {"privacy_mode": "local", "modules": {"battery": True, "health": True}})
+        snapshot = service.create_context_snapshot(db)
+        suggestions = service.generate_copilot_suggestions(db)
+        dashboard = service.copilot_dashboard(db)
+        target = dashboard["suggestions"][0] if dashboard["suggestions"] else service._create_suggestion(db, "test", "Test suggestion", "Test message", "low", {"type": "open", "target": "dashboard"})
+        acted = service.execute_copilot_action(db, target["id"], "save")
+
+        assert settings["privacy_mode"] == "local"
+        assert snapshot["payload"]["privacy"]["local_processing"] is True
+        assert isinstance(suggestions, list)
+        assert dashboard["offline_ready"] is True
+        assert "quick_actions" in dashboard
+        assert acted["suggestion"]["status"] == "saved"
+        assert db.query(ContextSnapshot).count() >= 1
+        assert db.query(CopilotInsight).count() >= 1
+        assert db.query(CopilotAction).count() >= 1
+        assert db.query(CopilotHistory).count() >= 1
+        assert db.query(CopilotAnalytics).count() >= 1

@@ -16,6 +16,7 @@ let voiceStatus = { microphone_status: "offline", mode: "offline", muted: false 
 let resourceStatus = { mode: "normal" };
 const apiBase = process.env.NEXA_API_BASE || "http://127.0.0.1:8010/api";
 const backendUrl = new URL(apiBase);
+const dashboardUrl = process.env.NEXA_DASHBOARD_URL || "http://127.0.0.1:5173/";
 
 if (process.env.NEXA_ELECTRON_DEBUG_PORT) {
   app.commandLine.appendSwitch("remote-debugging-port", process.env.NEXA_ELECTRON_DEBUG_PORT);
@@ -131,15 +132,15 @@ function refreshTrayMenu(unreadCount = 0) {
       { label: `Resource mode: ${resourceStatus.mode || "normal"}`, enabled: false },
       ...recentAlerts.slice(0, 5).map((alert) => ({
         label: `${alert.title} - ${alert.module}`,
-        click: () => shell.openExternal("http://127.0.0.1:5173/")
+        click: () => shell.openExternal(dashboardUrl)
       })),
       { type: "separator" },
       { label: "Show", click: () => overlay?.show() },
       { label: "Hide", click: () => overlay?.hide() },
       { label: "Pause Listening", enabled: !voiceStatus.muted, click: () => setListening(true) },
       { label: "Resume Listening", enabled: !!voiceStatus.muted, click: () => setListening(false) },
-      { label: "Show Tasks", click: () => shell.openExternal("http://127.0.0.1:5173/") },
-      { label: "Show Notifications", click: () => shell.openExternal("http://127.0.0.1:5173/") },
+      { label: "Show Tasks", click: () => shell.openExternal(dashboardUrl) },
+      { label: "Show Notifications", click: () => shell.openExternal(dashboardUrl) },
       {
         label: "Start Nexa on login",
         type: "checkbox",
@@ -196,7 +197,7 @@ function showElectronAlert(alert) {
     urgency: alert.severity === "critical" ? "critical" : "normal",
     actions: (alert.action_buttons || []).slice(0, 2).map((text) => ({ type: "button", text }))
   });
-  notification.on("click", () => shell.openExternal("http://127.0.0.1:5173/"));
+  notification.on("click", () => shell.openExternal(dashboardUrl));
   notification.on("action", async (_event, index) => {
     const action = (alert.action_buttons || [])[index] || "Opened";
     try {
@@ -218,11 +219,12 @@ function startAlertPolling() {
   alertPollTimer = setInterval(pollAlerts, 30000);
 }
 
-async function captureScreenshotAssistant() {
+async function captureScreenshotAssistant(mode = "full_screen") {
   try {
     const display = screen.getPrimaryDisplay();
+    const sourceTypes = mode === "active_window" ? ["window"] : ["screen"];
     const sources = await desktopCapturer.getSources({
-      types: ["screen"],
+      types: sourceTypes,
       thumbnailSize: { width: display.size.width, height: display.size.height }
     });
     const source = sources[0];
@@ -234,7 +236,7 @@ async function captureScreenshotAssistant() {
     const response = await fetch(`${apiBase}/evolution/screenshots`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ file_path: filePath, source: "ctrl_shift_a", capture_mode: "full_screen", language: "eng" })
+      body: JSON.stringify({ file_path: filePath, source: "ctrl_shift_a", capture_mode: mode, language: "eng" })
     });
     if (response.ok && Notification.isSupported()) {
       const result = await response.json();
@@ -270,7 +272,7 @@ async function captureScreenshotAssistant() {
 function registerGlobalShortcuts() {
   globalShortcut.unregister("Control+Shift+A");
   globalShortcut.register("Control+Shift+A", () => {
-    void captureScreenshotAssistant();
+    void captureScreenshotAssistant("full_screen");
   });
 }
 
@@ -303,6 +305,13 @@ ipcMain.handle("agent:api", async (_event, apiPath, options = {}) => {
   return data;
 });
 
+ipcMain.handle("screenshots:capture", async (_event, mode = "full_screen") => {
+  const allowed = new Set(["full_screen", "active_window", "current_monitor", "multi_monitor", "selected_area"]);
+  const captureMode = allowed.has(mode) ? mode : "full_screen";
+  await captureScreenshotAssistant(captureMode === "selected_area" ? "full_screen" : captureMode);
+  return { captured: true, mode: captureMode, fallback: captureMode === "selected_area" ? "full_screen" : null };
+});
+
 ipcMain.handle("files:open-folder", async (_event, folderKey) => {
   const home = os.homedir();
   const folders = {
@@ -318,13 +327,13 @@ ipcMain.handle("files:open-folder", async (_event, folderKey) => {
 });
 
 ipcMain.handle("app:open-dashboard", async () => {
-  await shell.openExternal("http://127.0.0.1:5173/");
+  await shell.openExternal(dashboardUrl);
   return { opened: true };
 });
 
 ipcMain.on("overlay:context-menu", () => {
   const menu = Menu.buildFromTemplate([
-    { label: "Open Nexa Dashboard", click: () => shell.openExternal("http://127.0.0.1:5173/") },
+    { label: "Open Nexa Dashboard", click: () => shell.openExternal(dashboardUrl) },
     { label: "Reset Position", click: () => overlay?.setBounds(clampToDisplay({ width: 96, height: 96, x: 40, y: 80 })) },
     { type: "separator" },
     { label: "Hide", click: () => overlay?.hide() },

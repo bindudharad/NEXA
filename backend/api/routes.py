@@ -1,8 +1,9 @@
 import json
 
 import asyncio
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from backend.agents.browser import BrowserAgent
@@ -26,8 +27,14 @@ from backend.api.schemas import (
     BrowserDownloadRequest,
     BrowserFormRequest,
     CollegeCheckRequest,
+    CollegeProfileRequest,
     CommandRequest,
+    CodingActivityRequest,
+    CopilotActionRequest,
     CopilotSuggestionStatusRequest,
+    CopilotSettingsRequest,
+    CustomPersonalityRequest,
+    CustomPersonalityUpdateRequest,
     DailyBriefingRequest,
     DailyBriefingSettingsRequest,
     DownloadsOrganizeRequest,
@@ -42,12 +49,20 @@ from backend.api.schemas import (
     FocusGoalProgressRequest,
     FocusGoalRequest,
     FocusStartRequest,
+    GoalEditRequest,
+    GoalIncrementRequest,
     GoalProgressRequest,
     GoalRequest,
     GpuMonitorSettingsRequest,
     GpuSimulationRequest,
     KcetResultRequest,
     MemoryRequest,
+    MobileDeviceUpdateRequest,
+    MobilePairingClaimRequest,
+    MobilePairingStartRequest,
+    MobileRefreshRequest,
+    MobileRemoteCommandRequest,
+    MobileSyncRequest,
     NotificationActionRequest,
     NotificationRequest,
     PowerMonitorSettingsRequest,
@@ -55,11 +70,15 @@ from backend.api.schemas import (
     ProjectGuardianProtectRequest,
     ProjectGuardianSnapshotRequest,
     ProjectGuardianRestoreRequest,
+    RecoveryCrashRequest,
+    RecoverySessionRequest,
+    RecoverySimulationRequest,
     ResourceManagerSettingsRequest,
     ScreenshotActionRequest,
     ScreenshotRecordRequest,
     ScreenshotSearchRequest,
     ScreenshotSettingsRequest,
+    SelfHealthOptimizeRequest,
     StudyChapterProgressRequest,
     StudyChapterRequest,
     StudyGoalRequest,
@@ -84,7 +103,7 @@ from backend.api.schemas import (
 )
 from backend.automation import AutomationEngine
 from backend.core.task_manager import TaskManager
-from backend.database.models import Automation, Notification, Task, TaskStatus
+from backend.database.models import Automation, AutomationAction, AutomationCondition, AutomationTrigger, Notification, Task, TaskStatus
 from backend.database.session import get_db
 from backend.services.battery_alert import battery_alert_service
 from backend.services.gpu_monitor import gpu_monitor_service
@@ -411,6 +430,11 @@ def coding_snapshot(db: Session = Depends(get_db)) -> dict:
     return CodingAgent(db).snapshot()
 
 
+@router.post("/coding/activity")
+def record_coding_activity(request: CodingActivityRequest, db: Session = Depends(get_db)) -> dict:
+    return CodingAgent(db).record_activity(request.model_dump())
+
+
 @router.get("/memory")
 def list_memory(db: Session = Depends(get_db)) -> list[dict]:
     return MemoryAgent(db).list()
@@ -439,6 +463,26 @@ def list_automations(db: Session = Depends(get_db)) -> list[dict]:
 @router.post("/automations")
 def create_automation(request: AutomationRequest, db: Session = Depends(get_db)) -> dict:
     return AutomationEngine(db).create(request.name, request.condition, request.action)
+
+
+@router.get("/automations/dashboard")
+def automations_dashboard(db: Session = Depends(get_db)) -> dict:
+    return AutomationEngine(db).dashboard()
+
+
+@router.get("/automations/history")
+def automation_history(limit: int = Query(default=100, ge=1, le=500), db: Session = Depends(get_db)) -> list[dict]:
+    return AutomationEngine(db).history(limit)
+
+
+@router.get("/automations/templates")
+def automation_templates(db: Session = Depends(get_db)) -> list[dict]:
+    return AutomationEngine(db).templates()
+
+
+@router.get("/automations/analytics")
+def automation_analytics(db: Session = Depends(get_db)) -> dict:
+    return AutomationEngine(db).analytics()
 
 
 @router.put("/automations/{automation_id}/toggle")
@@ -550,6 +594,37 @@ def voice_status() -> dict:
     return voice_assistant_service.get_status()
 
 
+@router.get("/voice/dashboard")
+def voice_dashboard() -> dict:
+    return voice_assistant_service.dashboard()
+
+
+@router.get("/voice/profiles")
+def voice_profiles() -> list[dict]:
+    return voice_assistant_service.profiles()
+
+
+@router.post("/voice/custom-personalities")
+def create_custom_personality(request: CustomPersonalityRequest) -> dict:
+    return voice_assistant_service.create_custom_personality(request.model_dump())
+
+
+@router.put("/voice/custom-personalities/{personality_id}")
+def update_custom_personality(personality_id: int, request: CustomPersonalityUpdateRequest) -> dict:
+    try:
+        return voice_assistant_service.update_custom_personality(personality_id, request.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/voice/custom-personalities/{personality_id}")
+def delete_custom_personality(personality_id: int) -> dict:
+    try:
+        return voice_assistant_service.delete_custom_personality(personality_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.post("/voice/wake")
 def voice_wake(request: VoiceWakeRequest) -> dict:
     return voice_assistant_service.wake(request.phrase, request.source)
@@ -588,6 +663,16 @@ def evaluate_copilot(db: Session = Depends(get_db)) -> list[dict]:
     return evolution_service.generate_copilot_suggestions(db)
 
 
+@router.get("/evolution/copilot/dashboard")
+def copilot_dashboard(db: Session = Depends(get_db)) -> dict:
+    return evolution_service.copilot_dashboard(db)
+
+
+@router.post("/evolution/copilot/context")
+def copilot_context(db: Session = Depends(get_db)) -> dict:
+    return evolution_service.create_context_snapshot(db)
+
+
 @router.get("/evolution/copilot/suggestions")
 def copilot_suggestions(limit: int = Query(default=50, ge=1, le=500), db: Session = Depends(get_db)) -> list[dict]:
     return evolution_service.list_copilot_suggestions(db, limit)
@@ -599,6 +684,44 @@ def update_copilot_suggestion(suggestion_id: int, request: CopilotSuggestionStat
         return evolution_service.update_suggestion_status(db, suggestion_id, request.status)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/evolution/copilot/suggestions/{suggestion_id}/actions")
+def execute_copilot_action(suggestion_id: int, request: CopilotActionRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.execute_copilot_action(db, suggestion_id, request.action_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/evolution/copilot/settings")
+def copilot_settings(db: Session = Depends(get_db)) -> dict:
+    return evolution_service.get_copilot_settings(db)
+
+
+@router.put("/evolution/copilot/settings")
+def update_copilot_settings(request: CopilotSettingsRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.update_copilot_settings(db, request.model_dump(exclude_unset=True))
+
+
+@router.get("/evolution/copilot/insights")
+def copilot_insights(db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.copilot_dashboard(db)["insights"]
+
+
+@router.get("/evolution/copilot/warnings")
+def copilot_warnings(db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.copilot_dashboard(db)["warnings"]
+
+
+@router.get("/evolution/copilot/history")
+def copilot_history(db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.copilot_dashboard(db)["history"]
+
+
+@router.get("/evolution/copilot/analytics")
+def copilot_analytics(db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.copilot_dashboard(db)["analytics"]
 
 
 @router.post("/evolution/daily-briefing")
@@ -912,6 +1035,43 @@ def project_guardian_restore(request: ProjectGuardianRestoreRequest, db: Session
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.get("/evolution/recovery/dashboard")
+def emergency_recovery_dashboard(db: Session = Depends(get_db)) -> dict:
+    return evolution_service.recovery_dashboard(db)
+
+
+@router.post("/evolution/recovery/crash-reports")
+def record_recovery_crash_report(request: RecoveryCrashRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.record_crash_report(db, request.crash_type, request.source, request.application, request.message, request.severity, request.stack_trace, request.diagnostics, request.project_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/evolution/recovery/sessions")
+def capture_recovery_session(request: RecoverySessionRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.capture_recovery_session(db, request.session_type, request.applications, request.project_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/evolution/recovery/sessions/{session_id}/restore")
+def restore_recovery_session(session_id: int, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.restore_recovery_session(db, session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/evolution/recovery/simulate")
+def simulate_recovery_event(request: RecoverySimulationRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.simulate_recovery_event(db, request.event_type, request.application, request.project_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/evolution/downloads/scan")
 def scan_downloads(request: DownloadsScanRequest, db: Session = Depends(get_db)) -> dict:
     try:
@@ -1033,7 +1193,7 @@ def build_automation(request: AutomationBuilderRequest, db: Session = Depends(ge
 
 @router.post("/evolution/goals")
 def create_goal(request: GoalRequest, db: Session = Depends(get_db)) -> dict:
-    return evolution_service.create_goal(db, request.title, request.target_value, request.unit, request.goal_type, request.period)
+    return evolution_service.create_goal(db, request.title, request.target_value, request.unit, request.goal_type, request.period, request.description, request.deadline, request.priority, request.category, request.reminder_settings)
 
 
 @router.get("/evolution/goals")
@@ -1046,10 +1206,54 @@ def goal_stats(db: Session = Depends(get_db)) -> dict:
     return evolution_service.goal_stats(db)
 
 
+@router.get("/evolution/goals/dashboard")
+def goal_dashboard(db: Session = Depends(get_db)) -> dict:
+    return evolution_service.goal_dashboard(db)
+
+
+@router.get("/evolution/goals/history")
+def goal_history(limit: int = Query(default=100, ge=1, le=500), db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.goal_history(db, limit)
+
+
+@router.get("/evolution/goals/analytics")
+def goal_analytics(db: Session = Depends(get_db)) -> dict:
+    return evolution_service.goal_analytics(db)
+
+
+@router.post("/evolution/goals/auto-track")
+def goal_auto_track(db: Session = Depends(get_db)) -> dict:
+    return evolution_service.refresh_goal_auto_tracking(db)
+
+
 @router.put("/evolution/goals/{goal_id}")
 def update_goal(goal_id: int, request: GoalProgressRequest, db: Session = Depends(get_db)) -> dict:
     try:
-        return evolution_service.update_goal(db, goal_id, request.current_value)
+        return evolution_service.update_goal(db, goal_id, request.current_value, request.source, request.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.patch("/evolution/goals/{goal_id}")
+def edit_goal(goal_id: int, request: GoalEditRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.edit_goal(db, goal_id, request.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/evolution/goals/{goal_id}/increment")
+def increment_goal(goal_id: int, request: GoalIncrementRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.increment_goal_progress(db, goal_id, request.delta_value, request.source, request.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/evolution/goals/{goal_id}")
+def delete_goal(goal_id: int, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.delete_goal(db, goal_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -1069,14 +1273,48 @@ def check_college_updates(request: CollegeCheckRequest, db: Session = Depends(ge
     return evolution_service.check_college_updates(db, request.source)
 
 
+@router.get("/evolution/college/dashboard")
+def college_dashboard(db: Session = Depends(get_db)) -> dict:
+    return evolution_service.college_dashboard(db)
+
+
+@router.post("/evolution/college/profiles")
+def create_college_profile(request: CollegeProfileRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.create_college_profile(db, request.name, request.portal_type, request.website_profile_id, request.target_attendance_percent)
+
+
 @router.get("/evolution/college/updates")
 def list_college_updates(limit: int = Query(default=50, ge=1, le=500), db: Session = Depends(get_db)) -> list[dict]:
     return evolution_service.list_college_updates(db, limit)
 
 
+@router.get("/evolution/college/{section}")
+def college_section(section: str, db: Session = Depends(get_db)) -> list[dict]:
+    dashboard = evolution_service.college_dashboard(db)
+    aliases = {
+        "attendance": "attendance",
+        "marks": "marks",
+        "results": "results",
+        "assignments": "assignments",
+        "fees": "fees",
+        "timetable": "timetables",
+        "announcements": "announcements",
+        "kcet": "kcet",
+    }
+    key = aliases.get(section)
+    if not key:
+        raise HTTPException(status_code=404, detail="College section not found")
+    return dashboard.get(key, [])
+
+
 @router.get("/evolution/self-health")
 def self_health(db: Session = Depends(get_db)) -> dict:
     return evolution_service.self_health(db)
+
+
+@router.post("/evolution/self-health/optimize")
+def optimize_self_health(request: SelfHealthOptimizeRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.optimize_self_health(db, request.action)
 
 
 @router.get("/mobile/summary")
@@ -1087,6 +1325,421 @@ def mobile_summary(db: Session = Depends(get_db)) -> dict:
 @router.get("/mobile/docs")
 def mobile_docs() -> dict:
     return evolution_service.mobile_api_docs()
+
+
+def _mobile_device(request: Request, db: Session):
+    try:
+        return evolution_service.mobile_authenticate(
+            db,
+            request.headers.get("authorization", ""),
+            request.client.host if request.client else "",
+            request.headers.get("user-agent", ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+@router.post("/mobile/pairing/start")
+def mobile_pairing_start(request: MobilePairingStartRequest, db: Session = Depends(get_db)) -> dict:
+    return evolution_service.mobile_pairing_start(db, request.device_name, request.permissions)
+
+
+@router.post("/mobile/pairing/claim")
+def mobile_pairing_claim(request: Request, body: MobilePairingClaimRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.mobile_pairing_claim(
+            db,
+            body.pairing_code,
+            body.pairing_token,
+            body.device_name,
+            body.device_type,
+            body.device_fingerprint,
+            request.client.host if request.client else "",
+            request.headers.get("user-agent", ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/mobile/auth/refresh")
+def mobile_auth_refresh(request: Request, body: MobileRefreshRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.mobile_refresh(db, body.refresh_token, request.client.host if request.client else "")
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+@router.get("/mobile/dashboard")
+def mobile_dashboard(db: Session = Depends(get_db)) -> dict:
+    return evolution_service.mobile_gateway_dashboard(db)
+
+
+@router.get("/mobile/devices")
+def mobile_devices(db: Session = Depends(get_db)) -> list[dict]:
+    return evolution_service.mobile_devices(db)
+
+
+@router.patch("/mobile/devices/{device_id}")
+def mobile_update_device(device_id: int, request: MobileDeviceUpdateRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.mobile_update_device(db, device_id, request.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/mobile/devices/{device_id}")
+def mobile_revoke_device(device_id: int, db: Session = Depends(get_db)) -> dict:
+    try:
+        return evolution_service.mobile_revoke_device(db, device_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/mobile/battery/status")
+def mobile_battery_status(request: Request, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    return power_monitor_service.get_status()
+
+
+@router.get("/mobile/battery/events")
+def mobile_battery_events(request: Request, db: Session = Depends(get_db)) -> list[dict]:
+    _mobile_device(request, db)
+    return power_monitor_service.history(limit=100)["events"]
+
+
+@router.get("/mobile/battery/history")
+def mobile_battery_history(request: Request, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    return power_monitor_service.history(limit=100)
+
+
+@router.get("/mobile/tasks")
+def mobile_tasks(request: Request, db: Session = Depends(get_db)) -> list[dict]:
+    _mobile_device(request, db)
+    return [serialize_task(task) for task in db.query(Task).order_by(Task.created_at.desc()).limit(100).all()]
+
+
+@router.post("/mobile/tasks")
+def mobile_create_task(request: Request, body: CommandRequest, db: Session = Depends(get_db)) -> dict:
+    device = _mobile_device(request, db)
+    task = Task(command=body.command, intent="mobile_task", agent="mobile_companion", status=TaskStatus.created.value, plan_json=json.dumps({"device_id": device.id}), result_json="{}")
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return serialize_task(task)
+
+
+@router.patch("/mobile/tasks/{task_id}")
+def mobile_update_task(task_id: int, request: Request, body: NotificationActionRequest, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    task = db.get(Task, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if body.action == "complete":
+        task.status = TaskStatus.completed.value
+    elif body.action == "cancel":
+        task.status = TaskStatus.cancelled.value
+    task.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(task)
+    return serialize_task(task)
+
+
+@router.delete("/mobile/tasks/{task_id}")
+def mobile_delete_task(task_id: int, request: Request, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    task = db.get(Task, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task.status = TaskStatus.cancelled.value
+    db.commit()
+    return {"status": "cancelled", "task_id": task_id}
+
+
+@router.get("/mobile/notifications")
+def mobile_notifications(request: Request, db: Session = Depends(get_db)) -> list[dict]:
+    _mobile_device(request, db)
+    rows = db.query(Notification).order_by(Notification.created_at.desc()).limit(100).all()
+    return [{"id": row.id, "title": row.title, "message": row.message, "alert_type": row.alert_type, "module": row.module, "severity": row.severity, "read": row.read, "created_at": row.created_at.isoformat()} for row in rows]
+
+
+@router.patch("/mobile/notifications/{notification_id}")
+def mobile_mark_notification(notification_id: int, request: Request, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    row = db.get(Notification, notification_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    row.read = True
+    db.commit()
+    return {"status": "read", "notification_id": notification_id}
+
+
+@router.delete("/mobile/notifications/{notification_id}")
+def mobile_delete_notification(notification_id: int, request: Request, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    row = db.get(Notification, notification_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    db.delete(row)
+    db.commit()
+    return {"status": "deleted", "notification_id": notification_id}
+
+
+@router.get("/mobile/notifications/alert-history")
+def mobile_alert_history(request: Request, db: Session = Depends(get_db)) -> list[dict]:
+    _mobile_device(request, db)
+    return AlertService(db).list(limit=200)
+
+
+@router.get("/mobile/notifications/settings")
+def mobile_notification_settings(request: Request, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    return AlertService(db).get_settings(db)
+
+
+@router.get("/mobile/notification-queue")
+def mobile_notification_queue(request: Request, status: str | None = Query(default=None), db: Session = Depends(get_db)) -> list[dict]:
+    device = _mobile_device(request, db)
+    return evolution_service.mobile_notification_queue(db, device, status)
+
+
+@router.get("/mobile/automations")
+def mobile_automations(request: Request, db: Session = Depends(get_db)) -> list[dict]:
+    _mobile_device(request, db)
+    return AutomationEngine(db).list()
+
+
+@router.post("/mobile/automations")
+def mobile_create_automation(request: Request, body: AutomationBuilderRequest, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    return evolution_service.build_automation(db, body.prompt)
+
+
+@router.patch("/mobile/automations/{automation_id}")
+def mobile_toggle_automation(automation_id: int, request: Request, body: AutomationToggleRequest, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    row = db.get(Automation, automation_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Automation not found")
+    row.enabled = body.enabled
+    db.commit()
+    db.refresh(row)
+    return AutomationEngine(db).serialize(row)
+
+
+@router.get("/mobile/automations/history")
+def mobile_automation_history(request: Request, db: Session = Depends(get_db)) -> list[dict]:
+    _mobile_device(request, db)
+    return AutomationEngine(db).history(100)
+
+
+@router.delete("/mobile/automations/{automation_id}")
+def mobile_delete_automation(automation_id: int, request: Request, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    row = db.get(Automation, automation_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Automation not found")
+    db.query(AutomationTrigger).filter(AutomationTrigger.automation_id == automation_id).delete()
+    db.query(AutomationCondition).filter(AutomationCondition.automation_id == automation_id).delete()
+    db.query(AutomationAction).filter(AutomationAction.automation_id == automation_id).delete()
+    db.delete(row)
+    db.commit()
+    return {"status": "deleted", "automation_id": automation_id}
+
+
+@router.get("/mobile/goals")
+def mobile_goals(request: Request, db: Session = Depends(get_db)) -> list[dict]:
+    _mobile_device(request, db)
+    return evolution_service.list_goals(db)
+
+
+@router.post("/mobile/goals")
+def mobile_create_goal(request: Request, body: GoalRequest, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    return evolution_service.create_goal(db, body.title, body.target_value, body.unit, body.goal_type, body.period, body.description, body.deadline, body.priority, body.category, body.reminder_settings)
+
+
+@router.patch("/mobile/goals/{goal_id}")
+def mobile_edit_goal(goal_id: int, request: Request, body: GoalEditRequest, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    try:
+        return evolution_service.edit_goal(db, goal_id, body.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/mobile/goals/{goal_id}")
+def mobile_delete_goal(goal_id: int, request: Request, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    try:
+        return evolution_service.delete_goal(db, goal_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/mobile/goals/progress")
+def mobile_goal_progress(request: Request, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    return evolution_service.goal_stats(db)
+
+
+@router.get("/mobile/goals/achievements")
+def mobile_goal_achievements(request: Request, db: Session = Depends(get_db)) -> list[dict]:
+    _mobile_device(request, db)
+    return evolution_service.list_achievements(db)
+
+
+@router.get("/mobile/goals/streaks")
+def mobile_goal_streaks(request: Request, db: Session = Depends(get_db)) -> list[dict]:
+    _mobile_device(request, db)
+    return evolution_service.goal_stats(db).get("streaks", [])
+
+
+@router.get("/mobile/study/dashboard")
+def mobile_study_dashboard(request: Request, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    return evolution_service.study_dashboard(db)
+
+
+@router.get("/mobile/study/subjects")
+def mobile_study_subjects(request: Request, db: Session = Depends(get_db)) -> list[dict]:
+    _mobile_device(request, db)
+    return evolution_service.study_dashboard(db)["subjects"]
+
+
+@router.get("/mobile/study/plans")
+def mobile_study_plans(request: Request, db: Session = Depends(get_db)) -> list[dict]:
+    _mobile_device(request, db)
+    return evolution_service.list_study_plans(db)
+
+
+@router.get("/mobile/study/progress")
+def mobile_study_progress(request: Request, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    dashboard = evolution_service.study_dashboard(db)
+    return {"subjects": dashboard["subjects"], "analytics": dashboard["analytics"], "recommendations": dashboard["recommendations"]}
+
+
+@router.get("/mobile/study/exam-countdown")
+def mobile_study_exam_countdown(request: Request, db: Session = Depends(get_db)) -> list[dict]:
+    _mobile_device(request, db)
+    return evolution_service.study_dashboard(db)["exam_countdowns"]
+
+
+@router.get("/mobile/study/revision-plans")
+def mobile_study_revision_plans(request: Request, db: Session = Depends(get_db)) -> list[dict]:
+    _mobile_device(request, db)
+    return evolution_service.study_dashboard(db)["revision_plans"]
+
+
+@router.get("/mobile/study/analytics")
+def mobile_study_analytics(request: Request, db: Session = Depends(get_db)) -> list[dict]:
+    _mobile_device(request, db)
+    return evolution_service.study_dashboard(db)["analytics"]
+
+
+@router.get("/mobile/college/dashboard")
+def mobile_college_dashboard(request: Request, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    return evolution_service.college_dashboard(db)
+
+
+@router.get("/mobile/college/updates")
+def mobile_college_updates(request: Request, db: Session = Depends(get_db)) -> list[dict]:
+    _mobile_device(request, db)
+    return evolution_service.list_college_updates(db, 100)
+
+
+@router.get("/mobile/college/{section}")
+def mobile_college_section(section: str, request: Request, db: Session = Depends(get_db)) -> list[dict]:
+    _mobile_device(request, db)
+    dashboard = evolution_service.college_dashboard(db)
+    aliases = {"attendance": "attendance", "marks": "marks", "results": "results", "assignments": "assignments", "fees": "fees", "timetable": "timetables", "announcements": "announcements", "kcet": "kcet"}
+    key = aliases.get(section)
+    if not key:
+        raise HTTPException(status_code=404, detail="College mobile section not found")
+    return dashboard.get(key, [])
+
+
+@router.get("/mobile/timeline")
+def mobile_timeline(request: Request, db: Session = Depends(get_db)) -> list[dict]:
+    _mobile_device(request, db)
+    return evolution_service.search_timeline(db, limit=100)
+
+
+@router.post("/mobile/timeline/search")
+def mobile_timeline_search(request: Request, body: TimelineSearchRequest, db: Session = Depends(get_db)) -> list[dict]:
+    _mobile_device(request, db)
+    return evolution_service.natural_memory_search(db, body.query, body.limit)["results"]
+
+
+@router.get("/mobile/timeline/daily-summary")
+def mobile_timeline_daily_summary(request: Request, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    return evolution_service.timeline_summary(db, "day")
+
+
+@router.get("/mobile/timeline/weekly-summary")
+def mobile_timeline_weekly_summary(request: Request, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    return evolution_service.timeline_summary(db, "week")
+
+
+@router.get("/mobile/timeline/monthly-summary")
+def mobile_timeline_monthly_summary(request: Request, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    return evolution_service.timeline_summary(db, "month")
+
+
+@router.get("/mobile/health/status")
+def mobile_health_status(request: Request, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    return evolution_service.self_health(db)
+
+
+@router.get("/mobile/health/errors")
+def mobile_health_errors(request: Request, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    return evolution_service.self_health(db)["error_monitor"]
+
+
+@router.get("/mobile/health/logs")
+def mobile_health_logs(request: Request, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    return evolution_service.self_health(db)["log_monitor"]
+
+
+@router.get("/mobile/health/automation")
+def mobile_health_automation(request: Request, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    return evolution_service.self_health(db)["automation_health"]
+
+
+@router.get("/mobile/health/api")
+def mobile_health_api(request: Request, db: Session = Depends(get_db)) -> dict:
+    _mobile_device(request, db)
+    return evolution_service.self_health(db)["api_health"]
+
+
+@router.post("/mobile/commands")
+def mobile_remote_command(request: Request, body: MobileRemoteCommandRequest, db: Session = Depends(get_db)) -> dict:
+    device = _mobile_device(request, db)
+    try:
+        return evolution_service.mobile_remote_command(db, device, body.command, body.payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/mobile/sync")
+def mobile_sync_queue(request: Request, status: str | None = Query(default=None), db: Session = Depends(get_db)) -> list[dict]:
+    device = _mobile_device(request, db)
+    return evolution_service.mobile_sync_queue(db, device, status)
+
+
+@router.post("/mobile/sync")
+def mobile_sync_enqueue(request: Request, body: MobileSyncRequest, db: Session = Depends(get_db)) -> dict:
+    device = _mobile_device(request, db)
+    return evolution_service.mobile_sync_enqueue(db, device, body.item_type, body.operation, body.payload, body.conflict_strategy)
 
 
 @router.post("/files/create")

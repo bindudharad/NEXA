@@ -162,6 +162,22 @@ export function SettingsPage() {
                 {["professional", "friendly", "jarvis", "minimal", "funny", "silent", "custom"].map((item) => <option key={item} value={item}>{item}</option>)}
               </select>
             </label>
+            {voiceSettings.response_style === "custom" && (
+              <div className="grid gap-2 rounded-xl border border-amber-200/10 bg-black/20 p-3">
+                <label className="grid gap-2 text-sm text-slate-300">
+                  Custom Wake Responses
+                  <input className="nexa-input h-10 rounded-xl px-3" value={(voiceSettings.custom_wake_responses ?? []).join(", ")} onChange={(event) => updateVoiceSettings({ custom_wake_responses: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} />
+                </label>
+                <label className="grid gap-2 text-sm text-slate-300">
+                  Completion Responses
+                  <input className="nexa-input h-10 rounded-xl px-3" value={(voiceSettings.custom_completion_responses ?? []).join(", ")} onChange={(event) => updateVoiceSettings({ custom_completion_responses: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} />
+                </label>
+                <label className="grid gap-2 text-sm text-slate-300">
+                  Error Responses
+                  <input className="nexa-input h-10 rounded-xl px-3" value={(voiceSettings.custom_error_responses ?? []).join(", ")} onChange={(event) => updateVoiceSettings({ custom_error_responses: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} />
+                </label>
+              </div>
+            )}
             <label className="grid gap-2 text-sm text-slate-300">
               Privacy Mode
               <select className="nexa-input h-10 rounded-xl px-3" value={voiceSettings.privacy_mode} onChange={(event) => updateVoiceSettings({ privacy_mode: event.target.value })}>
@@ -175,9 +191,10 @@ export function SettingsPage() {
             <div className="grid gap-2 sm:grid-cols-2">
               <NumberSetting label="Voice Volume" value={voiceSettings.voice_volume} onChange={(value) => updateVoiceSettings({ voice_volume: value })} />
               <NumberSetting label="Voice Speed" value={voiceSettings.voice_speed} onChange={(value) => updateVoiceSettings({ voice_speed: value })} />
+              <NumberSetting label="Voice Pitch" value={voiceSettings.voice_pitch} onChange={(value) => updateVoiceSettings({ voice_pitch: value })} />
             </div>
             <div className="nexa-card rounded-xl p-3 text-sm text-slate-300">
-              Microphone: {voiceStatus?.microphone_status ?? "unknown"} / Mode: {voiceStatus?.mode ?? "offline"} / Listener: {voiceStatus?.listener_running ? "running" : "stopped"}
+              Personality: {voiceSettings.response_style} / Microphone: {voiceStatus?.microphone_status ?? "unknown"} / Mode: {voiceStatus?.mode ?? "offline"} / Listener: {voiceStatus?.listener_running ? "running" : "stopped"}
             </div>
             <button className="h-10 rounded-xl bg-accent text-sm text-obsidian" onClick={testWake}>Test Wake Response</button>
           </div>

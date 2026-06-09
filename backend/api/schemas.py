@@ -6,6 +6,28 @@ class CommandRequest(BaseModel):
     auto_confirm: bool = False
 
 
+class CodingActivityRequest(BaseModel):
+    app_name: str = ""
+    process_name: str = ""
+    window_title: str = ""
+    project: str = ""
+    language: str = ""
+    active_file: str = ""
+    interaction_type: str = "typing"
+    duration_seconds: int = Field(default=0, ge=0, le=3600)
+    idle_seconds: int = Field(default=0, ge=0)
+    keystrokes: int = Field(default=0, ge=0)
+    mouse_events: int = Field(default=0, ge=0)
+    file_changes: int = Field(default=0, ge=0)
+    terminal_commands: int = Field(default=0, ge=0)
+    git_commands: int = Field(default=0, ge=0)
+    builds: int = Field(default=0, ge=0)
+    tests: int = Field(default=0, ge=0)
+    errors_fixed: int = Field(default=0, ge=0)
+    branch: str = ""
+    custom_editor: bool = False
+
+
 class ApprovalEditRequest(BaseModel):
     task_title: str | None = None
     date: str | None = None
@@ -62,6 +84,12 @@ class VoiceSettingsRequest(BaseModel):
     wake_phrases: list[str] | str | None = None
     activation_response: str | None = None
     response_style: str | None = None
+    custom_personality_id: int | None = None
+    custom_wake_responses: list[str] | None = None
+    custom_completion_responses: list[str] | None = None
+    custom_reminder_responses: list[str] | None = None
+    custom_error_responses: list[str] | None = None
+    custom_notification_responses: dict | None = None
     privacy_mode: str | None = None
     cloud_ai_enabled: bool | None = None
     offline_only: bool | None = None
@@ -72,6 +100,7 @@ class VoiceSettingsRequest(BaseModel):
     voice_enabled: bool | None = None
     voice_volume: int | None = Field(default=None, ge=0, le=100)
     voice_speed: int | None = Field(default=None, ge=-10, le=10)
+    voice_pitch: int | None = Field(default=None, ge=-10, le=10)
     voice_gender: str | None = None
     voice_language: str | None = None
     activation_notification_enabled: bool | None = None
@@ -89,9 +118,70 @@ class VoiceCommandRequest(BaseModel):
     source: str = "voice"
 
 
+class CustomPersonalityRequest(BaseModel):
+    name: str = Field(min_length=1)
+    greeting_style: str = ""
+    wake_responses: list[str] = ["I'm listening."]
+    completion_responses: list[str] = ["Done."]
+    reminder_responses: list[str] = ["You have a reminder."]
+    error_responses: list[str] = ["I could not complete that."]
+    notification_responses: dict = {}
+    enabled: bool = True
+
+
+class CustomPersonalityUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1)
+    greeting_style: str | None = None
+    wake_responses: list[str] | None = None
+    completion_responses: list[str] | None = None
+    reminder_responses: list[str] | None = None
+    error_responses: list[str] | None = None
+    notification_responses: dict | None = None
+    enabled: bool | None = None
+
+
 class EventRequest(BaseModel):
     event_type: str
     payload: dict = {}
+
+
+class SelfHealthOptimizeRequest(BaseModel):
+    action: str = "optimize"
+
+
+class MobilePairingStartRequest(BaseModel):
+    device_name: str = "Android Device"
+    permissions: list[str] | None = None
+
+
+class MobilePairingClaimRequest(BaseModel):
+    pairing_code: str = Field(min_length=4)
+    pairing_token: str = Field(min_length=10)
+    device_name: str = "Android Device"
+    device_type: str = "android"
+    device_fingerprint: str = ""
+
+
+class MobileRefreshRequest(BaseModel):
+    refresh_token: str = Field(min_length=10)
+
+
+class MobileDeviceUpdateRequest(BaseModel):
+    device_name: str | None = None
+    status: str | None = None
+    permissions: dict[str, bool] | None = None
+
+
+class MobileRemoteCommandRequest(BaseModel):
+    command: str = Field(min_length=1)
+    payload: dict = {}
+
+
+class MobileSyncRequest(BaseModel):
+    item_type: str = Field(min_length=1)
+    operation: str = "upsert"
+    payload: dict = {}
+    conflict_strategy: str = "desktop_wins"
 
 
 class FileOperationRequest(BaseModel):
@@ -254,6 +344,20 @@ class CopilotSuggestionStatusRequest(BaseModel):
     status: str = "dismissed"
 
 
+class CopilotActionRequest(BaseModel):
+    action_type: str = "act"
+
+
+class CopilotSettingsRequest(BaseModel):
+    enabled: bool | None = None
+    notifications_enabled: bool | None = None
+    voice_enabled: bool | None = None
+    privacy_mode: str | None = None
+    modules: dict[str, bool] | None = None
+    quiet_minutes: int | None = Field(default=None, ge=1, le=1440)
+    learning_enabled: bool | None = None
+
+
 class DailyBriefingRequest(BaseModel):
     speak: bool = False
     notify: bool = True
@@ -413,6 +517,29 @@ class ProjectGuardianRestoreRequest(BaseModel):
     restore_path: str = Field(min_length=1)
 
 
+class RecoveryCrashRequest(BaseModel):
+    crash_type: str = Field(min_length=1)
+    source: str = "manual"
+    application: str = ""
+    message: str = ""
+    severity: str = "high"
+    stack_trace: str = ""
+    diagnostics: dict = {}
+    project_path: str | None = None
+
+
+class RecoverySessionRequest(BaseModel):
+    session_type: str = "workspace"
+    applications: list[dict] = []
+    project_path: str | None = None
+
+
+class RecoverySimulationRequest(BaseModel):
+    event_type: str = Field(min_length=1)
+    application: str = "VS Code"
+    project_path: str | None = None
+
+
 class DownloadsScanRequest(BaseModel):
     folder: str | None = None
     large_file_mb: int = Field(default=500, ge=1)
@@ -472,15 +599,49 @@ class AutomationBuilderRequest(BaseModel):
 
 class GoalRequest(BaseModel):
     title: str = Field(min_length=1)
+    description: str = ""
     target_value: float = Field(gt=0)
     unit: str = "count"
     goal_type: str = "custom"
     period: str = "daily"
+    deadline: str = ""
+    priority: str = "medium"
+    category: str = ""
+    reminder_settings: dict = {}
 
 
 class GoalProgressRequest(BaseModel):
     current_value: float = Field(ge=0)
+    source: str = "manual"
+    note: str = ""
+
+
+class GoalIncrementRequest(BaseModel):
+    delta_value: float
+    source: str = "manual"
+    note: str = ""
+
+
+class GoalEditRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1)
+    description: str | None = None
+    target_value: float | None = Field(default=None, gt=0)
+    unit: str | None = None
+    goal_type: str | None = None
+    period: str | None = None
+    deadline: str | None = None
+    priority: str | None = None
+    category: str | None = None
+    status: str | None = None
+    reminder_settings: dict | None = None
 
 
 class CollegeCheckRequest(BaseModel):
     source: str = "college"
+
+
+class CollegeProfileRequest(BaseModel):
+    name: str = Field(min_length=1)
+    portal_type: str = "custom"
+    website_profile_id: int | None = None
+    target_attendance_percent: float = Field(default=75, ge=0, le=100)

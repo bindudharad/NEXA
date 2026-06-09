@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from backend.agents.file_agent import FileAgent
 from backend.agents.notifications import NotificationAgent
 from backend.agents.system import SystemAgent
-from backend.database.models import Notification, Task, VoiceInteraction, VoiceSetting
+from backend.database.models import Automation, CustomPersonality, Notification, Task, TimelineEvent, VoiceAnalytics, VoiceHistory, VoiceInteraction, VoiceProfile, VoiceSetting, WakeWordHistory
 from backend.database.session import SessionLocal
 from backend.services.power_monitor import power_monitor_service
 
@@ -31,7 +31,13 @@ class VoiceAssistantSettings:
     wake_word_enabled: bool = True
     wake_phrases: list[str] = field(default_factory=lambda: ["nexa", "hey nexa", "hello nexa", "nexa activate", "nexa wake up"])
     activation_response: str = "Yes?"
-    response_style: str = "concise"
+    response_style: str = "professional"
+    custom_personality_id: int | None = None
+    custom_wake_responses: list[str] = field(default_factory=list)
+    custom_completion_responses: list[str] = field(default_factory=list)
+    custom_reminder_responses: list[str] = field(default_factory=list)
+    custom_error_responses: list[str] = field(default_factory=list)
+    custom_notification_responses: dict = field(default_factory=dict)
     privacy_mode: str = "wake_word_only"
     cloud_ai_enabled: bool = True
     offline_only: bool = False
@@ -42,6 +48,7 @@ class VoiceAssistantSettings:
     voice_enabled: bool = True
     voice_volume: int = 85
     voice_speed: int = 0
+    voice_pitch: int = 0
     voice_gender: str = "default"
     voice_language: str = "en-US"
     activation_notification_enabled: bool = True
@@ -66,7 +73,63 @@ class VoiceAssistantStatus:
 class VoiceAssistantService:
     settings_key = "voice_assistant_settings"
     personality_modes = {"professional", "friendly", "jarvis", "minimal", "funny", "silent", "custom", "concise"}
-    wake_responses = {"Yes?", "I'm listening.", "How can I help?", "Ready.", "What would you like me to do?", "Nexa activated."}
+    wake_responses = {"Yes?", "I'm listening.", "How can I help?", "Ready.", "What would you like me to do?", "Nexa activated.", "Yes, how may I assist you?", "Hey! How can I help?", "At your service.", "You summoned me?"}
+    built_in_profiles = {
+        "professional": {
+            "name": "Professional",
+            "description": "Formal, clear, and work-focused.",
+            "wake": ["Yes, how may I assist you?", "How may I assist you?"],
+            "completion": ["Task completed successfully.", "The task has been completed."],
+            "reminder": ["You have a scheduled reminder.", "A reminder is due."],
+            "error": ["I could not complete that request.", "An error occurred while processing the request."],
+            "notifications": {"battery_low": "Battery level is low. Please connect your charger.", "automation": "Automation executed successfully.", "website": "The monitored website is now available."},
+        },
+        "friendly": {
+            "name": "Friendly",
+            "description": "Warm, helpful, and casual.",
+            "wake": ["Hey! How can I help?", "I'm listening."],
+            "completion": ["Done! You're all set.", "Your task is done."],
+            "reminder": ["You have a reminder coming up.", "Quick reminder for you."],
+            "error": ["I couldn't get that done yet.", "Something got in the way."],
+            "notifications": {"battery_low": "Looks like your battery is getting low.", "automation": "Your automation is done.", "website": "That website is available now."},
+        },
+        "jarvis": {
+            "name": "Jarvis",
+            "description": "Elegant, efficient assistant style.",
+            "wake": ["At your service.", "Ready when you are."],
+            "completion": ["The requested operation has been completed.", "The requested task has been completed."],
+            "reminder": ["A reminder has been scheduled.", "Your reminder is now due."],
+            "error": ["I was unable to complete the operation.", "The operation could not be completed."],
+            "notifications": {"battery_low": "Power reserves are low.", "automation": "Automation sequence completed.", "website": "The monitored site is available."},
+        },
+        "minimal": {
+            "name": "Minimal",
+            "description": "Short, fast, and direct.",
+            "wake": ["Yes?", "Ready."],
+            "completion": ["Done.", "Completed."],
+            "reminder": ["Reminder.", "Due now."],
+            "error": ["Failed.", "Error."],
+            "notifications": {"battery_low": "Battery low.", "automation": "Automation done.", "website": "Website available."},
+        },
+        "funny": {
+            "name": "Funny",
+            "description": "Lighthearted without being noisy.",
+            "wake": ["You summoned me?", "Ready for another mission?"],
+            "completion": ["Mission accomplished.", "Achievement unlocked: task completed."],
+            "reminder": ["Your reminder has entered the chat.", "Tiny nudge: you have something due."],
+            "error": ["That did not go as planned.", "I hit a tiny wall there."],
+            "notifications": {"battery_low": "Your laptop is asking for food.", "automation": "Mission accomplished.", "website": "The website gates are open."},
+        },
+        "silent": {
+            "name": "Silent",
+            "description": "No spoken responses, visual feedback only.",
+            "wake": [""],
+            "completion": [""],
+            "reminder": [""],
+            "error": [""],
+            "notifications": {},
+        },
+    }
 
     def __init__(self, db_factory: Callable[[], Session] = SessionLocal) -> None:
         self.db_factory = db_factory
@@ -121,6 +184,7 @@ class VoiceAssistantService:
         owns_db = db is None
         db = db or self.db_factory()
         try:
+            self.ensure_profiles(db)
             row = db.query(VoiceSetting).filter(VoiceSetting.key == self.settings_key).one_or_none()
             if not row:
                 return VoiceAssistantSettings()
@@ -134,11 +198,19 @@ class VoiceAssistantService:
         current.update({key: value for key, value in updates.items() if value is not None})
         if isinstance(current.get("wake_phrases"), str):
             current["wake_phrases"] = [item.strip().lower() for item in current["wake_phrases"].split(",") if item.strip()]
+        if updates.get("response_style") and "activation_response" not in updates:
+            style = "minimal" if updates["response_style"] == "concise" else updates["response_style"]
+            if style == "silent":
+                current["activation_response"] = ""
+            elif style in self.built_in_profiles:
+                current["activation_response"] = self.built_in_profiles[style]["wake"][0]
         settings = VoiceAssistantSettings(**current)
         self._validate(settings)
+        previous = self.get_settings(db).response_style
         owns_db = db is None
         db = db or self.db_factory()
         try:
+            self.ensure_profiles(db)
             value = json.dumps(asdict(settings), default=str)
             row = db.query(VoiceSetting).filter(VoiceSetting.key == self.settings_key).one_or_none()
             if row:
@@ -146,6 +218,21 @@ class VoiceAssistantService:
                 row.updated_at = datetime.utcnow()
             else:
                 db.add(VoiceSetting(key=self.settings_key, value_json=value))
+            if previous != settings.response_style:
+                db.add(VoiceHistory(event_type="personality_changed", personality=settings.response_style, input_text=previous, response_text=f"Voice personality changed to {settings.response_style}.", context_json=json.dumps({"from": previous, "to": settings.response_style})))
+                db.add(TimelineEvent(event_type="voice", title="Voice personality changed", description=f"Nexa voice personality changed from {previous} to {settings.response_style}.", source="voice_assistant", metadata_json=json.dumps({"from": previous, "to": settings.response_style, "important": True})))
+                NotificationAgent(db).notify(
+                    "Nexa Voice Personality",
+                    f"Voice personality changed to {settings.response_style}.",
+                    alert_type="voice_personality",
+                    module="voice_assistant",
+                    severity="low",
+                    priority="low",
+                    category="info",
+                    suggested_action="Test the wake response or adjust voice settings.",
+                    action_buttons=["Test Voice", "Dismiss"],
+                    metadata={"from": previous, "to": settings.response_style},
+                )
             db.commit()
         finally:
             if owns_db:
@@ -168,7 +255,7 @@ class VoiceAssistantService:
         settings = self.get_settings()
         if not settings.enabled or not settings.wake_word_enabled:
             return {"activated": False, "reason": "wake word disabled"}
-        response = settings.activation_response
+        response = "" if settings.response_style == "silent" else self.personality_response("wake", settings.activation_response or "Yes?", {"phrase": phrase}) if settings.response_style == "custom" else settings.activation_response or self.personality_response("wake", "Yes?", {"phrase": phrase})
         now = datetime.utcnow().isoformat()
         with self._lock:
             self.status.last_wake_time = now
@@ -193,9 +280,13 @@ class VoiceAssistantService:
                     voice_enabled=False,
                     metadata={"phrase": phrase, "source": source},
                 )
-        if settings.voice_enabled:
+        if self._should_speak(settings, response):
             self.speak(response)
         self._record("wake_detected", phrase, response, self._mode(settings), "completed", {"source": source})
+        with self.db_factory() as db:
+            db.add(WakeWordHistory(phrase=phrase, source=source, personality=settings.response_style, response_text=response, status="detected"))
+            self._analytics(db, settings.response_style, wake=1, spoken=1 if response and settings.voice_enabled else 0)
+            db.commit()
         logger.info("Wake word detected phrase=%s source=%s", phrase, source)
         return {"activated": True, "response": response, "mode": self._mode(settings), "timestamp": now}
 
@@ -210,28 +301,32 @@ class VoiceAssistantService:
         mode = self._mode(settings)
         try:
             result = self._execute_local_command(command)
-            response = result["response"]
+            response = self.personality_response(self._response_context(result), result["response"], {"command": command, "result": result})
             status = "completed"
         except Exception as exc:
-            response = f"I could not complete that locally: {exc}"
+            response = self.personality_response("error", f"I could not complete that locally: {exc}", {"command": command, "error": str(exc)})
             result = {"handled": False, "error": str(exc)}
             status = "failed"
             logger.exception("Voice command failed command=%s", command)
-        if settings.voice_enabled:
+        if self._should_speak(settings, response):
             self.speak(response)
         with self._lock:
-            self.status.microphone_status = "speaking" if settings.voice_enabled else "listening"
+            self.status.microphone_status = "speaking" if self._should_speak(settings, response) else "listening"
             self.status.last_response = response
             self.status.last_error = result.get("error")
-        if settings.voice_enabled:
+        if self._should_speak(settings, response):
             threading.Timer(2.5, self._return_to_listening).start()
         self._record("voice_command", command, response, mode, status, {"source": source, "result": result})
+        with self.db_factory() as db:
+            self._analytics(db, settings.response_style, commands=1, spoken=1 if self._should_speak(settings, response) else 0, errors=1 if status == "failed" else 0)
+            db.commit()
         return {"command": command, "response": response, "mode": mode, "status": status, "result": result}
 
     def speak(self, text: str) -> None:
         settings = self.get_settings()
-        if not settings.voice_enabled:
+        if not self._should_speak(settings, text):
             return
+        text = self.personality_response("notification", text, {})
         script = (
             "Add-Type -AssemblyName System.Speech; "
             "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
@@ -241,6 +336,9 @@ class VoiceAssistantService:
         try:
             subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False)
             logger.info("Voice response spoken text=%s", text)
+            with self.db_factory() as db:
+                self._analytics(db, settings.response_style, spoken=1)
+                db.commit()
         except Exception:
             logger.exception("Voice response failed")
 
@@ -260,6 +358,144 @@ class VoiceAssistantService:
                 }
                 for row in rows
             ]
+
+    def ensure_profiles(self, db: Session | None = None) -> None:
+        owns_db = db is None
+        db = db or self.db_factory()
+        try:
+            existing = {row.profile_key for row in db.query(VoiceProfile).all()}
+            for key, profile in self.built_in_profiles.items():
+                if key in existing:
+                    continue
+                db.add(
+                    VoiceProfile(
+                        profile_key=key,
+                        name=profile["name"],
+                        style=key,
+                        description=profile["description"],
+                        wake_responses_json=json.dumps(profile["wake"]),
+                        completion_responses_json=json.dumps(profile["completion"]),
+                        reminder_responses_json=json.dumps(profile["reminder"]),
+                        error_responses_json=json.dumps(profile["error"]),
+                        notification_responses_json=json.dumps(profile["notifications"]),
+                        tts_settings_json=json.dumps({"language": "en-US", "volume": 85, "speed": 0, "pitch": 0}),
+                        built_in=True,
+                    )
+                )
+            db.commit()
+        finally:
+            if owns_db:
+                db.close()
+
+    def profiles(self) -> list[dict]:
+        with self.db_factory() as db:
+            self.ensure_profiles(db)
+            return [self._profile_dict(row) for row in db.query(VoiceProfile).order_by(VoiceProfile.built_in.desc(), VoiceProfile.name.asc()).all()]
+
+    def create_custom_personality(self, payload: dict) -> dict:
+        with self.db_factory() as db:
+            row = CustomPersonality(
+                name=payload.get("name", "Custom Personality"),
+                greeting_style=payload.get("greeting_style", ""),
+                wake_responses_json=json.dumps(payload.get("wake_responses") or ["I'm listening."]),
+                completion_responses_json=json.dumps(payload.get("completion_responses") or ["Done."]),
+                reminder_responses_json=json.dumps(payload.get("reminder_responses") or ["You have a reminder."]),
+                error_responses_json=json.dumps(payload.get("error_responses") or ["I could not complete that."]),
+                notification_responses_json=json.dumps(payload.get("notification_responses") or {}),
+            )
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+            return self._custom_personality_dict(row)
+
+    def update_custom_personality(self, personality_id: int, payload: dict) -> dict:
+        with self.db_factory() as db:
+            row = db.get(CustomPersonality, personality_id)
+            if not row:
+                raise ValueError("Custom personality not found")
+            for key, attr in {
+                "name": "name",
+                "greeting_style": "greeting_style",
+                "wake_responses": "wake_responses_json",
+                "completion_responses": "completion_responses_json",
+                "reminder_responses": "reminder_responses_json",
+                "error_responses": "error_responses_json",
+                "notification_responses": "notification_responses_json",
+            }.items():
+                if key not in payload:
+                    continue
+                value = payload[key] if key in {"name", "greeting_style"} else json.dumps(payload[key], default=str)
+                setattr(row, attr, value)
+            if "enabled" in payload:
+                row.enabled = bool(payload["enabled"])
+            row.updated_at = datetime.utcnow()
+            db.commit()
+            db.refresh(row)
+            return self._custom_personality_dict(row)
+
+    def delete_custom_personality(self, personality_id: int) -> dict:
+        with self.db_factory() as db:
+            row = db.get(CustomPersonality, personality_id)
+            if not row:
+                raise ValueError("Custom personality not found")
+            row.enabled = False
+            row.updated_at = datetime.utcnow()
+            db.commit()
+            return {"id": personality_id, "deleted": True}
+
+    def dashboard(self) -> dict:
+        settings = self.get_settings()
+        with self.db_factory() as db:
+            self.ensure_profiles(db)
+            history = [self._voice_history_dict(row) for row in db.query(VoiceHistory).order_by(VoiceHistory.created_at.desc()).limit(50).all()]
+            wake = [self._wake_history_dict(row) for row in db.query(WakeWordHistory).order_by(WakeWordHistory.created_at.desc()).limit(50).all()]
+            analytics = [self._voice_analytics_dict(row) for row in db.query(VoiceAnalytics).order_by(VoiceAnalytics.created_at.desc()).limit(30).all()]
+            custom = [self._custom_personality_dict(row) for row in db.query(CustomPersonality).order_by(CustomPersonality.updated_at.desc()).all()]
+            return {
+                "current_personality": settings.response_style,
+                "voice_status": self.get_status(),
+                "wake_word_status": {"enabled": settings.wake_word_enabled, "phrases": settings.wake_phrases, "privacy_mode": settings.privacy_mode},
+                "voice_statistics": self._voice_statistics(analytics),
+                "recent_responses": history,
+                "wake_history": wake,
+                "voice_history": history,
+                "profiles": [self._profile_dict(row) for row in db.query(VoiceProfile).order_by(VoiceProfile.name.asc()).all()],
+                "custom_personalities": custom,
+                "offline_ready": True,
+            }
+
+    def personality_response(self, context: str, default: str, detail: dict | None = None) -> str:
+        settings = self.get_settings()
+        style = settings.response_style
+        if style == "concise":
+            style = "minimal"
+        if style == "silent":
+            return ""
+        detail = detail or {}
+        profile = self._active_profile(settings)
+        if context == "wake":
+            return self._first_response(profile.get("wake", []), default)
+        if context in {"completion", "task_completed"}:
+            return self._first_response(profile.get("completion", []), default)
+        if context == "reminder":
+            return self._first_response(profile.get("reminder", []), default)
+        if context == "error":
+            return self._first_response(profile.get("error", []), default)
+        if context in {"battery_low", "automation", "website", "notification"}:
+            mapped = profile.get("notifications", {}).get(context) or profile.get("notifications", {}).get(self._notification_context(default))
+            return mapped or default
+        if context == "daily_briefing":
+            if style == "minimal":
+                return default.replace("Good morning. ", "").split(" Have a productive day.")[0]
+            if style == "friendly":
+                return default.replace("Good morning.", "Good morning!").replace("Have a productive day.", "Have a good one.")
+            if style == "jarvis":
+                return default.replace("Good morning.", "Good morning. Your briefing is ready.")
+            if style == "funny":
+                return default.replace("Good morning.", "Good morning. Daily mission briefing loaded.")
+        if context == "battery_status":
+            return self._battery_personality_response(default, style)
+        return default
 
     def _execute_local_command(self, command: str) -> dict:
         lower = command.lower().strip()
@@ -306,6 +542,13 @@ class VoiceAssistantService:
         if "open settings" in lower:
             subprocess.Popen(["cmd", "/c", "start", "ms-settings:"], shell=False)
             return {"handled": True, "response": "Opening Windows Settings.", "action": "open_settings"}
+        if "create automation" in lower:
+            from backend.services.evolution import evolution_service
+
+            with self.db_factory() as db:
+                prompt = command.split("automation", 1)[-1].strip() or command
+                result = evolution_service.build_automation(db, prompt)
+            return {"handled": True, "response": f"Automation created: {result['automation']['name']}.", "action": "automation_create", "result": result}
         if "battery" in lower or "charging" in lower:
             status = power_monitor_service.get_status()
             percent = status.get("battery_percent")
@@ -313,6 +556,26 @@ class VoiceAssistantService:
             response = f"Battery is currently {percent if percent is not None else 'unknown'} percent"
             response += " and charging." if charging else " and running on battery power." if charging is False else "."
             return {"handled": True, "response": response, "action": "battery_status", "status": status}
+        if "nexa health" in lower or "show errors" in lower or "optimize nexa" in lower or "show api status" in lower or "restart service" in lower or "nexa cpu" in lower or "nexa ram" in lower:
+            from backend.services.evolution import evolution_service
+
+            with self.db_factory() as db:
+                if "optimize nexa" in lower:
+                    result = evolution_service.optimize_self_health(db, "optimize")
+                    return {"handled": True, "response": "Nexa optimization completed.", "action": "self_health_optimize", "result": result}
+                if "restart service" in lower:
+                    result = evolution_service.optimize_self_health(db, "restart_services")
+                    return {"handled": True, "response": "Nexa service health has been refreshed.", "action": "self_health_restart_services", "result": result}
+                dashboard = evolution_service.self_health(db)
+                if "show errors" in lower:
+                    return {"handled": True, "response": f"Nexa has {dashboard['error_monitor']['count']} recent error log entries.", "action": "self_health_errors", "dashboard": dashboard}
+                if "show api status" in lower:
+                    return {"handled": True, "response": f"API health is {dashboard['api_health']['summary']['status']} with {dashboard['api_health']['summary']['success_rate']} percent success.", "action": "self_health_api", "dashboard": dashboard}
+                if "nexa cpu" in lower:
+                    return {"handled": True, "response": f"Nexa CPU usage is {dashboard['cpu']['current_percent']} percent.", "action": "self_health_cpu", "dashboard": dashboard}
+                if "nexa ram" in lower:
+                    return {"handled": True, "response": f"Nexa RAM usage is {dashboard['ram']['current_mb']} megabytes.", "action": "self_health_ram", "dashboard": dashboard}
+                return {"handled": True, "response": f"Nexa health is {dashboard['health_score']} percent and status is {dashboard['status']}.", "action": "self_health_dashboard", "dashboard": dashboard}
         if "system health" in lower or "cpu" in lower or "memory" in lower:
             status = system.status()
             return {"handled": True, "response": f"CPU is {status['cpu_percent']} percent and memory is {status['ram_percent']} percent.", "action": "system_health", "status": status}
@@ -320,6 +583,31 @@ class VoiceAssistantService:
             with self.db_factory() as db:
                 count = db.query(Notification).filter(Notification.read.is_(False)).count()
             return {"handled": True, "response": f"You have {count} unread notifications.", "action": "notifications"}
+        if "create goal" in lower or "show goals" in lower or "show progress" in lower or "mark goal complete" in lower or "show streaks" in lower or "show achievements" in lower:
+            from backend.services.evolution import evolution_service
+
+            with self.db_factory() as db:
+                if "create goal" in lower:
+                    title = command.split("goal", 1)[-1].strip(" .") or "New Goal"
+                    target = self._extract_number(lower, 1)
+                    unit = "hours" if "hour" in lower else "minutes" if "minute" in lower else "pages" if "page" in lower else "count"
+                    goal_type = "coding" if "code" in lower or "coding" in lower else "study" if "study" in lower else "reading" if "read" in lower else "custom"
+                    goal = evolution_service.create_goal(db, title, target, unit, goal_type, "daily")
+                    return {"handled": True, "response": f"Goal created: {goal['title']}.", "action": "goal_create", "goal": goal}
+                dashboard = evolution_service.goal_dashboard(db)
+                if "mark goal complete" in lower:
+                    active = dashboard["active_goals"][0] if dashboard["active_goals"] else None
+                    if not active:
+                        return {"handled": True, "response": "No active goals are available to complete.", "action": "goal_complete_empty"}
+                    goal = evolution_service.update_goal(db, active["id"], active["target_value"], "voice", "Marked complete by voice command")
+                    return {"handled": True, "response": f"Goal completed: {goal['title']}.", "action": "goal_complete", "goal": goal}
+                if "show streaks" in lower:
+                    return {"handled": True, "response": f"You have {len(dashboard['streaks'])} active goal streak(s).", "action": "goal_streaks", "dashboard": dashboard}
+                if "show achievements" in lower:
+                    return {"handled": True, "response": f"You have {len(dashboard['achievements'])} achievement(s).", "action": "goal_achievements", "dashboard": dashboard}
+                active_count = len(dashboard["active_goals"])
+                average = dashboard["statistics"].get("average_progress_percent", 0)
+                return {"handled": True, "response": f"You have {active_count} active goals with {average} percent average progress.", "action": "goal_dashboard", "dashboard": dashboard}
         if "capture screen" in lower or "analyze screen" in lower or "explain this error" in lower or "read screenshot" in lower or "summarize document" in lower or "extract text" in lower or "save notes" in lower or "screenshot history" in lower:
             from backend.services.evolution import evolution_service
 
@@ -358,6 +646,25 @@ class VoiceAssistantService:
                     return {"handled": True, "response": dashboard["summary"]["summary"], "action": "timeline_show", "dashboard": dashboard}
                 search = evolution_service.natural_memory_search(db, command)
             return {"handled": True, "response": search["summary"], "action": "timeline_search", "result": search}
+        if "recovery dashboard" in lower or "show recovery" in lower or "crash reports" in lower or "restore session" in lower or "recover vscode" in lower or "recover cursor" in lower or "terminal recovery" in lower or "power loss recovery" in lower:
+            from backend.services.evolution import evolution_service
+
+            with self.db_factory() as db:
+                dashboard = evolution_service.recovery_dashboard(db)
+                if "restore session" in lower:
+                    latest = dashboard["recovery_sessions"][0] if dashboard["recovery_sessions"] else None
+                    if latest:
+                        restored = evolution_service.restore_recovery_session(db, latest["id"])
+                        return {"handled": True, "response": "Latest recovery session has been marked restored. Review the restore plan before reopening sensitive work.", "action": "recovery_session_restore", "session": restored}
+                    return {"handled": True, "response": "No recovery sessions are available.", "action": "recovery_session_restore", "session": None}
+                if "crash reports" in lower:
+                    return {"handled": True, "response": f"There are {dashboard['summary']['crash_reports']} crash reports, with {dashboard['summary']['open_reports']} still open.", "action": "recovery_crash_reports", "dashboard": dashboard}
+                if "recover vscode" in lower or "recover cursor" in lower or "terminal recovery" in lower or "power loss recovery" in lower:
+                    app = "VS Code" if "vscode" in lower else "Cursor" if "cursor" in lower else "Terminal" if "terminal" in lower else "Windows"
+                    event = "power_loss" if "power loss" in lower else f"{app.lower().replace(' ', '_')}_recovery_request"
+                    result = evolution_service.simulate_recovery_event(db, event, app)
+                    return {"handled": True, "response": f"{app} recovery state captured. Open Emergency Recovery to review restore options.", "action": "recovery_capture", "result": result}
+            return {"handled": True, "response": f"Emergency Recovery health is {round(dashboard['summary']['health_score'])} percent with {dashboard['summary']['recovery_sessions']} recovery sessions available.", "action": "recovery_dashboard", "dashboard": dashboard}
         if "backup project" in lower or "create snapshot" in lower or "show backups" in lower or "show git status" in lower or "project health" in lower or "recover last version" in lower or "restore project" in lower:
             from backend.services.evolution import evolution_service
 
@@ -383,6 +690,29 @@ class VoiceAssistantService:
                     return {"handled": True, "response": response, "action": "project_recovery", "recovery_point": latest}
                 snapshot = evolution_service.project_guardian_snapshot(db, project_path, "voice_snapshot")
             return {"handled": True, "response": "Project recovery snapshot created.", "action": "project_snapshot", "snapshot": snapshot}
+        if "create automation" in lower or "show automations" in lower or "pause automation" in lower or "resume automation" in lower or "automation history" in lower:
+            from backend.automation import AutomationEngine
+            from backend.services.evolution import evolution_service
+
+            with self.db_factory() as db:
+                engine = AutomationEngine(db)
+                if "create automation" in lower:
+                    prompt = command.split("automation", 1)[-1].strip() or command
+                    result = evolution_service.build_automation(db, prompt)
+                    return {"handled": True, "response": f"Automation created: {result['automation']['name']}.", "action": "automation_create", "result": result}
+                if "pause automation" in lower or "resume automation" in lower:
+                    items = engine.list()
+                    if not items:
+                        return {"handled": True, "response": "No automations are available.", "action": "automation_toggle", "automation": None}
+                    row = db.get(Automation, items[0]["id"])
+                    row.enabled = "resume automation" in lower
+                    db.commit()
+                    return {"handled": True, "response": f"Automation {row.name} {'resumed' if row.enabled else 'paused'}.", "action": "automation_toggle", "automation": engine.serialize(row)}
+                if "automation history" in lower:
+                    history = engine.history(20)
+                    return {"handled": True, "response": f"You have {len(history)} automation history item(s).", "action": "automation_history", "history": history}
+                dashboard = engine.dashboard()
+            return {"handled": True, "response": f"You have {len(dashboard['active'])} active and {len(dashboard['paused'])} paused automations.", "action": "automation_dashboard", "dashboard": dashboard}
         if "create a study plan" in lower or "create study plan" in lower or "help me prepare for my exam" in lower or re.search(r"\bexam is in \d+ days\b", lower):
             from backend.services.evolution import evolution_service
 
@@ -486,12 +816,40 @@ class VoiceAssistantService:
             with self.db_factory() as db:
                 briefing = evolution_service.generate_daily_briefing(db, speak=False, notify=True)
             return {"handled": True, "response": "Your daily briefing is ready.", "action": "daily_briefing", "briefing": briefing}
-        if "college updates" in lower or "check results" in lower or "show attendance" in lower or "show timetable" in lower or "check fees" in lower:
+        if "college updates" in lower or "check college" in lower or "check results" in lower or "show attendance" in lower or "show marks" in lower or "show timetable" in lower or "check fees" in lower or "show fees" in lower or "show assignments" in lower or "check kcet" in lower or "read announcements" in lower:
             from backend.services.evolution import evolution_service
 
             with self.db_factory() as db:
+                if "show attendance" in lower:
+                    dashboard = evolution_service.college_dashboard(db)
+                    response = f"Overall attendance is {dashboard['summary'].split('Internal Marks:')[0].replace('Attendance:', '').strip()}"
+                    return {"handled": True, "response": response, "action": "college_attendance", "dashboard": dashboard}
+                if "show marks" in lower:
+                    dashboard = evolution_service.college_dashboard(db)
+                    return {"handled": True, "response": f"You have {len(dashboard['marks'])} internal marks record(s).", "action": "college_marks", "dashboard": dashboard}
+                if "check results" in lower:
+                    dashboard = evolution_service.college_dashboard(db)
+                    return {"handled": True, "response": f"You have {len(dashboard['results'])} result record(s).", "action": "college_results", "dashboard": dashboard}
+                if "show timetable" in lower:
+                    dashboard = evolution_service.college_dashboard(db)
+                    return {"handled": True, "response": f"You have {len(dashboard['timetables'])} timetable item(s).", "action": "college_timetable", "dashboard": dashboard}
+                if "check fees" in lower or "show fees" in lower:
+                    dashboard = evolution_service.college_dashboard(db)
+                    pending = sum(1 for item in dashboard["fees"] if item["status"] == "pending")
+                    return {"handled": True, "response": f"You have {pending} pending fee item(s).", "action": "college_fees", "dashboard": dashboard}
+                if "show assignments" in lower:
+                    dashboard = evolution_service.college_dashboard(db)
+                    pending = sum(1 for item in dashboard["assignments"] if item["status"] != "completed")
+                    return {"handled": True, "response": f"You have {pending} pending assignment(s).", "action": "college_assignments", "dashboard": dashboard}
+                if "check kcet" in lower:
+                    dashboard = evolution_service.college_dashboard(db)
+                    return {"handled": True, "response": f"You have {len(dashboard['kcet'])} KCET update(s).", "action": "college_kcet", "dashboard": dashboard}
+                if "read announcements" in lower:
+                    dashboard = evolution_service.college_dashboard(db)
+                    latest = dashboard["announcements"][0]["title"] if dashboard["announcements"] else "No announcements are cached."
+                    return {"handled": True, "response": latest, "action": "college_announcements", "dashboard": dashboard}
                 result = evolution_service.check_college_updates(db, "college")
-            response = "College profile is required in Website Vault." if result.get("requires_profile") else "College updates are ready."
+            response = "College profile is required in Website Vault." if result.get("requires_profile") else result["dashboard"]["summary"]
             return {"handled": True, "response": response, "action": "college_updates", "result": result}
         if "view tasks" in lower or "show tasks" in lower:
             with self.db_factory() as db:
@@ -568,6 +926,8 @@ while ($true) {{ Start-Sleep -Seconds 1 }}
     def _record(self, event_type: str, transcript: str, response: str, mode: str, status: str, detail: dict) -> None:
         with self.db_factory() as db:
             db.add(VoiceInteraction(event_type=event_type, transcript=transcript, response_text=response, mode=mode, status=status, detail_json=json.dumps(detail, default=str)))
+            settings = self.get_settings(db)
+            db.add(VoiceHistory(event_type=event_type, personality=settings.response_style, input_text=transcript, response_text=response, context_json=json.dumps({"mode": mode, **detail}, default=str), status=status))
             db.commit()
 
     def _return_to_listening(self) -> None:
@@ -600,6 +960,10 @@ while ($true) {{ Start-Sleep -Seconds 1 }}
             return 10
         return max(1, min(180, int(match.group(1))))
 
+    def _extract_number(self, text: str, default: int) -> int:
+        match = re.search(r"(\d+(?:\.\d+)?)", text)
+        return int(float(match.group(1))) if match else default
+
     def _extract_study_subject(self, text: str) -> str:
         patterns = [
             r"study plan for ([a-z0-9 #+._-]+)",
@@ -617,12 +981,122 @@ while ($true) {{ Start-Sleep -Seconds 1 }}
                 return cleaned.upper() if len(cleaned) <= 5 else cleaned.title()
         return ""
 
+    def _should_speak(self, settings: VoiceAssistantSettings, response: str) -> bool:
+        return bool(settings.voice_enabled and settings.response_style != "silent" and response.strip())
+
+    def _response_context(self, result: dict) -> str:
+        action = str(result.get("action", ""))
+        response = str(result.get("response", "")).lower()
+        if "battery" in action or "battery" in response:
+            return "battery_status" if "status" in action else "battery_low"
+        if "automation" in action:
+            return "automation"
+        if "reminder" in action:
+            return "reminder"
+        if "website" in action:
+            return "website"
+        if result.get("error"):
+            return "error"
+        if action in {"task_completed", "goal_completed", "automation_completed"}:
+            return "completion"
+        return "notification"
+
+    def _notification_context(self, text: str) -> str:
+        lower = text.lower()
+        if "battery" in lower:
+            return "battery_low"
+        if "automation" in lower:
+            return "automation"
+        if "website" in lower:
+            return "website"
+        return "notification"
+
+    def _active_profile(self, settings: VoiceAssistantSettings) -> dict:
+        style = "minimal" if settings.response_style == "concise" else settings.response_style
+        if style == "custom":
+            custom = None
+            with self.db_factory() as db:
+                if settings.custom_personality_id:
+                    custom = db.get(CustomPersonality, settings.custom_personality_id)
+                if not custom:
+                    custom = db.query(CustomPersonality).filter(CustomPersonality.enabled.is_(True)).order_by(CustomPersonality.updated_at.desc()).first()
+                if custom:
+                    return {
+                        "wake": json.loads(custom.wake_responses_json or "[]"),
+                        "completion": json.loads(custom.completion_responses_json or "[]"),
+                        "reminder": json.loads(custom.reminder_responses_json or "[]"),
+                        "error": json.loads(custom.error_responses_json or "[]"),
+                        "notifications": json.loads(custom.notification_responses_json or "{}"),
+                    }
+            return {
+                "wake": settings.custom_wake_responses or ["I'm listening."],
+                "completion": settings.custom_completion_responses or ["Done."],
+                "reminder": settings.custom_reminder_responses or ["You have a reminder."],
+                "error": settings.custom_error_responses or ["I could not complete that."],
+                "notifications": settings.custom_notification_responses or {},
+            }
+        return self.built_in_profiles.get(style, self.built_in_profiles["professional"])
+
+    def _first_response(self, responses: list[str], default: str) -> str:
+        clean = [item for item in responses if item is not None]
+        if not clean:
+            return default
+        index = int(datetime.utcnow().timestamp()) % len(clean)
+        return clean[index]
+
+    def _battery_personality_response(self, default: str, style: str) -> str:
+        if style == "minimal":
+            return default.replace("Battery is currently", "Battery").replace(" and charging.", ", charging.").replace(" and running on battery power.", ", unplugged.")
+        if style == "jarvis":
+            return default.replace("Battery is currently", "Battery reserves are at").replace(" and running on battery power.", " and external power is disconnected.")
+        if style == "friendly":
+            return default.replace("Battery is currently", "Your battery is at")
+        if style == "funny":
+            return default.replace("Battery is currently", "Your battery snack meter is at")
+        return default
+
+    def _analytics(self, db: Session, personality: str, wake: int = 0, commands: int = 0, spoken: int = 0, errors: int = 0, muted: int = 0) -> None:
+        today = date.today().isoformat()
+        row = db.query(VoiceAnalytics).filter(VoiceAnalytics.analytics_date == today, VoiceAnalytics.personality == personality).first()
+        if row is None:
+            row = VoiceAnalytics(analytics_date=today, personality=personality)
+            db.add(row)
+        row.wake_count = (row.wake_count or 0) + wake
+        row.command_count = (row.command_count or 0) + commands
+        row.spoken_response_count = (row.spoken_response_count or 0) + spoken
+        row.error_count = (row.error_count or 0) + errors
+        row.muted_count = (row.muted_count or 0) + muted
+
+    def _voice_statistics(self, analytics: list[dict]) -> dict:
+        return {
+            "wake_count": sum(item["wake_count"] for item in analytics),
+            "command_count": sum(item["command_count"] for item in analytics),
+            "spoken_response_count": sum(item["spoken_response_count"] for item in analytics),
+            "error_count": sum(item["error_count"] for item in analytics),
+            "muted_count": sum(item["muted_count"] for item in analytics),
+        }
+
+    def _profile_dict(self, row: VoiceProfile) -> dict:
+        return {"id": row.id, "profile_key": row.profile_key, "name": row.name, "style": row.style, "description": row.description, "wake_responses": json.loads(row.wake_responses_json or "[]"), "completion_responses": json.loads(row.completion_responses_json or "[]"), "reminder_responses": json.loads(row.reminder_responses_json or "[]"), "error_responses": json.loads(row.error_responses_json or "[]"), "notification_responses": json.loads(row.notification_responses_json or "{}"), "tts_settings": json.loads(row.tts_settings_json or "{}"), "built_in": row.built_in, "enabled": row.enabled, "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat()}
+
+    def _custom_personality_dict(self, row: CustomPersonality) -> dict:
+        return {"id": row.id, "name": row.name, "greeting_style": row.greeting_style, "wake_responses": json.loads(row.wake_responses_json or "[]"), "completion_responses": json.loads(row.completion_responses_json or "[]"), "reminder_responses": json.loads(row.reminder_responses_json or "[]"), "error_responses": json.loads(row.error_responses_json or "[]"), "notification_responses": json.loads(row.notification_responses_json or "{}"), "enabled": row.enabled, "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat()}
+
+    def _voice_history_dict(self, row: VoiceHistory) -> dict:
+        return {"id": row.id, "event_type": row.event_type, "personality": row.personality, "input_text": row.input_text, "response_text": row.response_text, "context": json.loads(row.context_json or "{}"), "status": row.status, "created_at": row.created_at.isoformat()}
+
+    def _wake_history_dict(self, row: WakeWordHistory) -> dict:
+        return {"id": row.id, "phrase": row.phrase, "source": row.source, "confidence": row.confidence, "personality": row.personality, "response_text": row.response_text, "status": row.status, "created_at": row.created_at.isoformat()}
+
+    def _voice_analytics_dict(self, row: VoiceAnalytics) -> dict:
+        return {"id": row.id, "analytics_date": row.analytics_date, "personality": row.personality, "wake_count": row.wake_count or 0, "command_count": row.command_count or 0, "spoken_response_count": row.spoken_response_count or 0, "error_count": row.error_count or 0, "muted_count": row.muted_count or 0, "metadata": json.loads(row.metadata_json or "{}"), "created_at": row.created_at.isoformat()}
+
     def _validate(self, settings: VoiceAssistantSettings) -> None:
         if not settings.wake_phrases:
             raise ValueError("At least one wake phrase is required")
         if settings.response_style not in self.personality_modes:
             raise ValueError(f"response_style must be one of {sorted(self.personality_modes)}")
-        if settings.response_style != "custom" and settings.activation_response not in self.wake_responses:
+        if settings.response_style not in {"custom", "silent"} and settings.activation_response not in self.wake_responses:
             raise ValueError("activation_response must be a supported wake response unless response_style is custom")
         if not 0 <= settings.voice_volume <= 100:
             raise ValueError("voice_volume must be between 0 and 100")

@@ -188,6 +188,12 @@ export type VoiceSettings = {
   wake_phrases: string[];
   activation_response: string;
   response_style: string;
+  custom_personality_id: number | null;
+  custom_wake_responses: string[];
+  custom_completion_responses: string[];
+  custom_reminder_responses: string[];
+  custom_error_responses: string[];
+  custom_notification_responses: Record<string, string>;
   privacy_mode: string;
   cloud_ai_enabled: boolean;
   offline_only: boolean;
@@ -198,6 +204,7 @@ export type VoiceSettings = {
   voice_enabled: boolean;
   voice_volume: number;
   voice_speed: number;
+  voice_pitch: number;
   voice_gender: string;
   voice_language: string;
   activation_notification_enabled: boolean;
